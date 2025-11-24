@@ -1,0 +1,65 @@
+How to Use
+
+Copy all three scripts to the root of your USB drive along with:
+
+USB_ROOT\
+ ├─ plakar_repo\        (your Plakar repository)
+ ├─ .plakar_key         (optional for silent unlock)
+ ├─ backup.ps1
+ ├─ restore.ps1
+ └─ menu.ps1
+
+
+Plug the USB into any Windows PC.
+
+Open PowerShell as Administrator.
+
+Run:
+
+.\menu.ps1
+
+
+The technician can now:
+
+Backup with profile selection
+
+Restore to new PC
+
+List snapshots
+
+Launch Plakar UI
+
+Everything auto-detects repository, keyfile, and drive letter, and logs each action.
+
+
+Usage Instructions
+
+Copy the scripts, plakar.exe, plakar_repo, and optionally .plakar_key to the root of your USB:
+
+USB_ROOT\
+ ├─ plakar.exe
+ ├─ plakar_repo\
+ ├─ .plakar_key
+ ├─ backup.ps1
+ ├─ restore.ps1
+ └─ menu.ps1
+
+
+Plug USB into any Windows PC.
+
+Open PowerShell as Administrator.
+
+Run:
+
+.\menu.ps1
+
+
+Backup: select profiles to back up
+
+Restore: select snapshot and destination
+
+Snapshots: list available snapshots
+
+UI: open Plakar web interface
+
+Everything works without installing Plakar, fully portable.
