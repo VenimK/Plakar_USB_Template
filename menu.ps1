@@ -10,6 +10,47 @@ if (-not $IsAdmin) {
     exit
 }
 
+# ------------------------------
+# USMT user selection helpers
+# ------------------------------
+function Get-UserProfileNames {
+    $systemProfiles = @('All Users','Default','Default User','Public','WDAGUtilityAccount')
+    try {
+        Get-ChildItem 'C:\Users' -Directory -ErrorAction Stop |
+            Where-Object { $systemProfiles -notcontains $_.Name } |
+            Select-Object -ExpandProperty Name
+    } catch {
+        @()
+    }
+}
+
+function Select-USMTUsers {
+    $names = Get-UserProfileNames
+    if (-not $names -or $names.Count -eq 0) {
+        Write-Host "No user profiles found under C:\\Users" -ForegroundColor Yellow
+        return @()
+    }
+    Write-Host "Available user profiles:" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $names.Count; $i++) {
+        Write-Host ("  {0}. {1}" -f ($i+1), $names[$i])
+    }
+    $choice = Read-Host "Enter numbers to include (e.g. 1,3,5) or * for all"
+    if ($choice -eq '*') { $selected = $names }
+    else {
+        $indexes = $choice -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[0-9]+$' } | ForEach-Object { [int]$_ - 1 }
+        $selected = @()
+        foreach ($idx in $indexes) {
+            if ($idx -ge 0 -and $idx -lt $names.Count) { $selected += $names[$idx] }
+        }
+    }
+    if (-not $selected -or $selected.Count -eq 0) {
+        Write-Host "No users selected." -ForegroundColor Yellow
+        return @()
+    }
+    # Return fully-qualified local accounts for USMT /ui
+    return $selected | ForEach-Object { "$env:COMPUTERNAME\$_" }
+}
+
 # =============================================================
 # Plakar + USMT Technician Menu – USB Version
 # =============================================================
@@ -47,7 +88,7 @@ $ScanLog = Join-Path $USMTPath "scanstate.log"
 $LoadLog = Join-Path $USMTPath "loadstate.log"
 $MigUserXML = Join-Path $USMTPath "miguser.xml"
 $MigAppXML = Join-Path $USMTPath "migapp.xml"
-
+$MigDocsXML = Join-Path $USMTPath "migdocs.xml"
 # ------------------------------
 # Check USMT prerequisites
 # ------------------------------
@@ -157,8 +198,23 @@ do {
             if (-not (Require-USMTCheck)) { break }
             if (!(Test-Path $USMTStore)) { New-Item -ItemType Directory -Path $USMTStore | Out-Null }
 
-            Write-Host "Running USMT ScanState..." -ForegroundColor Cyan
-            & $ScanState "$USMTStore" "/i:$MigUserXML" "/i:$MigAppXML" /o /c /v:5 "/l:$ScanLog"
+            # Ask which user profiles to include
+            $uiUsers = Select-USMTUsers
+            if (-not $uiUsers -or $uiUsers.Count -eq 0) { Pause; break }
+
+            $args = @()
+            $args += "$USMTStore"
+            $args += "/i:$MigUserXML"
+            $args += "/i:$MigAppXML"
+            $args += "/i:$MigDocsXML"
+            foreach ($u in $uiUsers) { $args += "/ui:$u" }
+            $args += "/o"
+            $args += "/c"
+            $args += "/v:5"
+            $args += "/l:$ScanLog"
+
+            Write-Host "Running USMT ScanState for: $($uiUsers -join ', ')" -ForegroundColor Cyan
+            & $ScanState @args
 
             if ($LASTEXITCODE -eq 0) { Write-Host "USMT Backup completed successfully." -ForegroundColor Green }
             else { Write-Host "USMT Backup FAILED. Check log: $ScanLog" -ForegroundColor Red }
@@ -171,7 +227,7 @@ do {
             if (-not (Require-USMTCheck)) { break }
 
             Write-Host "Running USMT LoadState..." -ForegroundColor Cyan
-            & $LoadState "$USMTStore" "/i:$MigUserXML" "/i:$MigAppXML" /c /lac /lae /v:5 "/l:$LoadLog"
+            & $LoadState "$USMTStore" "/i:$MigUserXML" "/i:$MigAppXML" "/i:$MigDocsXML" /c /lac /lae /v:5 "/l:$LoadLog"
 
             if ($LASTEXITCODE -eq 0) { Write-Host "USMT Restore completed successfully." -ForegroundColor Green }
             else { Write-Host "USMT Restore FAILED. Check log: $LoadLog" -ForegroundColor Red }
