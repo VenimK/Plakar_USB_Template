@@ -7,12 +7,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$SCRIPT_DIR/plakar_repo"
 PLAKAR_EXE="$(command -v plakar || echo "$SCRIPT_DIR/plakar")"
 
-# Parallel processing settings
-THREADS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)  # Get CPU core count or default to 4
-PARALLEL_JOBS=4  # Number of parallel backup jobs
-PARALLEL_ENABLED=true  # Set to false to disable parallel processing
+# Parallel processing settings (portable)
+THREADS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)  # CPU core count (macOS/BSD)
+PARALLEL_JOBS=4  # Max concurrent user backups (option 1)
+PARALLEL_ENABLED=true  # Enable per-user parallel backups
 MAX_LOG_SIZE_MB=10  # Max log file size in MB
-MAX_LOGS=5          # Max number of log files to keep
+MAX_LOGS=5          # Max number of compressed logs to keep
 EXCLUDE_PATTERNS=("*.tmp" "*.log" "*.cache" "*.temp" "~*" "Thumbs.db" ".DS_Store" "*.swp" "*~" "*.bak")
 
 if [ -z "$PLAKAR_EXE" ] || [ ! -x "$PLAKAR_EXE" ]; then
@@ -59,12 +59,16 @@ fi
 # FUNCTIONS
 #####################################################
 
-# Function to check disk space
+# Function to check disk space (portable: BSD/macOS df)
 check_disk_space() {
-    local required=$1
-    local available=$(df -k --output=avail "$REPO" | tail -n1)
-    if [ "$available" -lt $((required * 1024)) ]; then
-        echo "❌ Not enough disk space! Need at least ${required}MB free."
+    local required_mb=$1
+    # Available 1K blocks in the filesystem hosting REPO
+    local available_k=$(df -k "$REPO" 2>/dev/null | awk 'NR==2{print $4}')
+    [ -z "$available_k" ] && available_k=0
+    # Compare in MB
+    local available_mb=$((available_k / 1024))
+    if [ "$available_mb" -lt "$required_mb" ]; then
+        echo "❌ Not enough disk space! Need at least ${required_mb}MB free (have ${available_mb}MB)."
         return 1
     fi
     return 0
@@ -77,47 +81,23 @@ rotate_logs() {
     ls -tp "$log_dir"/*.log.gz 2>/dev/null | tail -n +$((MAX_LOGS + 1)) | xargs -d '\n' -r rm --
 }
 
-# Function for parallel backup
-parallel_backup() {
+# Launch a single directory backup in background, with simple concurrency control
+backup_dir_bg() {
     local src_dir="$1"
     local tag="$2"
     local log_file="$3"
-    local tmp_dir="/tmp/plakar_parallel_$$"
-    
-    echo "Starting parallel backup with $PARALLEL_JOBS jobs..." | tee -a "$log_file"
-    
-    # Create temporary directory for parallel processing
-    mkdir -p "$tmp_dir"
-    
-    # Split directory listing into chunks
-    echo "Scanning directory for files..." | tee -a "$log_file"
-    find "$src_dir" -type f > "$tmp_dir/filelist.txt"
-    local total_files=$(wc -l < "$tmp_dir/filelist.txt")
-    echo "Found $total_files files to back up" | tee -a "$log_file"
-    
-    # Split into chunks for parallel processing
-    split -n l/$PARALLEL_JOBS "$tmp_dir/filelist.txt" "$tmp_dir/chunk_"
-    
-    # Process chunks in parallel
-    echo "Starting parallel backup processes..." | tee -a "$log_file"
-    local i=0
-    for chunk in "$tmp_dir/chunk_"*; do
-        ((i++))
-        {
-            echo "[Job $i] Starting backup of $(wc -l < "$chunk") files" | tee -a "$log_file"
-            while IFS= read -r file; do
-                "$PLAKAR_EXE" $KEYOPTION at "$REPO" backup --tag "$tag" --no-scan "$file" 2>> "$log_file.$i"
-            done < "$chunk"
-            echo "[Job $i] Completed" | tee -a "$log_file"
-        } &
+    {
+        echo "[Backup] $src_dir → tag=$tag" | tee -a "$log_file"
+        "$PLAKAR_EXE" $KEYOPTION at "$REPO" backup --tag "$tag" "$src_dir" 2>&1 | tee -a "$log_file"
+        echo "[Backup] Completed $src_dir" | tee -a "$log_file"
+    } &
+}
+
+# Throttle background jobs to PARALLEL_JOBS
+throttle_jobs() {
+    while [ "$(jobs -p | wc -l | tr -d ' ')" -ge "$PARALLEL_JOBS" ]; do
+        sleep 0.5
     done
-    
-    # Wait for all background jobs to complete
-    wait
-    
-    # Cleanup
-    rm -rf "$tmp_dir"
-    echo "Parallel backup completed" | tee -a "$log_file"
 }
 
 #####################################################
@@ -145,28 +125,27 @@ while true; do
             [ -z "$SNAP_NAME" ] && SNAP_NAME="Unnamed"
             SNAP_TAG="${SNAP_NAME}_$(date +%Y%m%d_%H%M%S)"
             SNAP_LOG="$SCRIPT_DIR/logs/backup_users_${SNAP_TAG}.log"
-            echo "Backing up user profiles as tag '$SNAP_TAG'..."
+            echo "Backing up user profiles as tag prefix '$SNAP_TAG'..."
+            if ! check_disk_space 1024; then  # Require at least 1GB free before starting batch
+                read -p "Not enough free space. Press enter..."
+                continue
+            fi
             if [ "$PARALLEL_ENABLED" = true ]; then
+                echo "Running up to $PARALLEL_JOBS backups in parallel..." | tee -a "$SNAP_LOG"
                 for USER_DIR in /Users/*; do
                     USERNAME=$(basename "$USER_DIR")
                     [ "$USERNAME" != "Shared" ] || continue
-                    echo " - Processing $USER_DIR in parallel mode" | tee -a "$SNAP_LOG"
-                    if ! check_disk_space 1024; then  # Check for at least 1GB free
-                        echo "❌ Skipping $USER_DIR - not enough disk space" | tee -a "$SNAP_LOG"
-                        continue
-                    fi
-                    parallel_backup "$USER_DIR" "${SNAP_TAG}_${USERNAME}" "$SNAP_LOG"
+                    [ -d "$USER_DIR" ] || continue
+                    throttle_jobs
+                    backup_dir_bg "$USER_DIR" "${SNAP_TAG}_${USERNAME}" "$SNAP_LOG"
                 done
+                wait
             else
                 for USER_DIR in /Users/*; do
                     USERNAME=$(basename "$USER_DIR")
                     [ "$USERNAME" != "Shared" ] || continue
-                    echo " - $USER_DIR (sequential mode)" | tee -a "$SNAP_LOG"
-                    if ! check_disk_space 1024; then  # Check for at least 1GB free
-                        echo "❌ Skipping $USER_DIR - not enough disk space" | tee -a "$SNAP_LOG"
-                        continue
-                    fi
-                    $PLAKAR_EXE $KEYOPTION at "$REPO" backup --tag "${SNAP_TAG}_${USERNAME}" "$USER_DIR" 2>&1 | tee -a "$SNAP_LOG"
+                    [ -d "$USER_DIR" ] || continue
+                    "$PLAKAR_EXE" $KEYOPTION at "$REPO" backup --tag "${SNAP_TAG}_${USERNAME}" "$USER_DIR" 2>&1 | tee -a "$SNAP_LOG"
                 done
             fi
             echo "✔ Backup complete. Tag: $SNAP_TAG"
@@ -184,23 +163,13 @@ while true; do
             SNAP_TAG="${SNAP_NAME}_$(date +%Y%m%d_%H%M%S)"
             SNAP_LOG="$SCRIPT_DIR/logs/backup_custom_${SNAP_TAG}.log"
             echo "Backing up '$CUSTOM_FOLDER' as tag '$SNAP_TAG'..."
-            if [ "$PARALLEL_ENABLED" = true ]; then
-                echo "Using parallel backup mode with $PARALLEL_JOBS jobs" | tee -a "$SNAP_LOG"
-                if ! check_disk_space 1024; then  # Check for at least 1GB free
-                    echo "❌ Not enough disk space for backup" | tee -a "$SNAP_LOG"
-                    read -p "Press enter..."
-                    continue
-                fi
-                parallel_backup "$CUSTOM_FOLDER" "$SNAP_TAG" "$SNAP_LOG"
-            else
-                echo "Using sequential backup mode" | tee -a "$SNAP_LOG"
-                if ! check_disk_space 1024; then  # Check for at least 1GB free
-                    echo "❌ Not enough disk space for backup" | tee -a "$SNAP_LOG"
-                    read -p "Press enter..."
-                    continue
-                fi
-                $PLAKAR_EXE $KEYOPTION at "$REPO" backup --tag "$SNAP_TAG" "$CUSTOM_FOLDER" 2>&1 | tee -a "$SNAP_LOG"
+            echo "Using sequential backup (safe single snapshot)" | tee -a "$SNAP_LOG"
+            if ! check_disk_space 1024; then  # Check for at least 1GB free
+                echo "❌ Not enough disk space for backup" | tee -a "$SNAP_LOG"
+                read -p "Press enter..."
+                continue
             fi
+            $PLAKAR_EXE $KEYOPTION at "$REPO" backup --tag "$SNAP_TAG" "$CUSTOM_FOLDER" 2>&1 | tee -a "$SNAP_LOG"
             echo "✔ Backup complete"
             read -p "Press enter..."
         ;;
