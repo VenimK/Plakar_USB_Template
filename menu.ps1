@@ -65,9 +65,21 @@ $PlakarExe = Join-Path $ScriptDir "plakar.exe"
 $KeyFile = Join-Path $ScriptDir ".plakar_key"
 
 # Handle keyfile setup before creating repository
+$NeedsPassphrase = $false
 if (!(Test-Path $KeyFile)) {
-    Write-Host "No .plakar_key found. Setting up passphrase..." -ForegroundColor Yellow
-    Write-Host "Enter a passphrase for the Plakar repository (or press Enter for no passphrase):" -ForegroundColor Cyan
+    $NeedsPassphrase = $true
+} else {
+    # Check if keyfile contains placeholder text
+    $KeyContent = Get-Content $KeyFile -Raw -ErrorAction SilentlyContinue
+    if ($KeyContent -match 'CHANGE_THIS_PASSPHRASE' -or [string]::IsNullOrWhiteSpace($KeyContent)) {
+        $NeedsPassphrase = $true
+        Write-Host "Placeholder passphrase detected in .plakar_key" -ForegroundColor Yellow
+    }
+}
+
+if ($NeedsPassphrase) {
+    Write-Host "Setting up passphrase for Plakar repository..." -ForegroundColor Yellow
+    Write-Host "Enter a passphrase (or press Enter for no passphrase):" -ForegroundColor Cyan
     $Passphrase = Read-Host -AsSecureString
     $PlainPassphrase = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Passphrase))
     
@@ -77,6 +89,8 @@ if (!(Test-Path $KeyFile)) {
         Write-Host "Passphrase saved to .plakar_key" -ForegroundColor Green
     } else {
         Write-Host "No passphrase set. Repository will be unencrypted." -ForegroundColor Yellow
+        # Remove keyfile if user wants no passphrase
+        if (Test-Path $KeyFile) { Remove-Item $KeyFile -Force }
     }
 }
 
