@@ -64,18 +64,35 @@ $Repo = Join-Path $ScriptDir "plakar_repo"
 $PlakarExe = Join-Path $ScriptDir "plakar.exe"
 $KeyFile = Join-Path $ScriptDir ".plakar_key"
 
-# Ensure Plakar repo exists
-if (!(Test-Path $Repo)) {
-    Write-Host "Creating Plakar repository at $Repo..." -ForegroundColor Cyan
-    & $PlakarExe at "$Repo" create
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: Failed to create Plakar repository." -ForegroundColor Red
-        exit
+# Handle keyfile setup before creating repository
+if (!(Test-Path $KeyFile)) {
+    Write-Host "No .plakar_key found. Setting up passphrase..." -ForegroundColor Yellow
+    Write-Host "Enter a passphrase for the Plakar repository (or press Enter for no passphrase):" -ForegroundColor Cyan
+    $Passphrase = Read-Host -AsSecureString
+    $PlainPassphrase = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Passphrase))
+    
+    if ($PlainPassphrase -ne "") {
+        # Save passphrase to .plakar_key
+        $PlainPassphrase | Out-File -FilePath $KeyFile -Encoding ASCII -NoNewline
+        Write-Host "Passphrase saved to .plakar_key" -ForegroundColor Green
+    } else {
+        Write-Host "No passphrase set. Repository will be unencrypted." -ForegroundColor Yellow
     }
 }
 
 # Keyfile support
 $KeyOption = if (Test-Path $KeyFile) { "--keyfile=`"$KeyFile`"" } else { "" }
+
+# Ensure Plakar repo exists
+if (!(Test-Path $Repo)) {
+    Write-Host "Creating Plakar repository at $Repo..." -ForegroundColor Cyan
+    & $PlakarExe $KeyOption at "$Repo" create
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Failed to create Plakar repository." -ForegroundColor Red
+        exit
+    }
+    Write-Host "Repository created successfully." -ForegroundColor Green
+}
 
 # ------------------------------
 # USMT setup (all in D:\USMT\X64)

@@ -1,2 +1,6 @@
 .DS_Store
 plakar_repo/CONFIG
+plakar_repo/LOGS
+plakar_repo/locks
+plakar_repo/packfiles
+plakar_repo/states
