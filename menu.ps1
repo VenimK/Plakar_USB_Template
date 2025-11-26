@@ -109,9 +109,12 @@ if (!(Test-Path $Repo)) {
 }
 
 # ------------------------------
-# USMT setup (all in D:\USMT\X64)
+# USMT setup (dynamic USB path detection)
 # ------------------------------
-$USMTPath = "E:\USMT\X64"
+# Get the drive letter from the script's location (e.g., if script is on E:\, use E:\USMT\X64)
+$ScriptDrive = Split-Path -Qualifier $ScriptDir
+if ([string]::IsNullOrEmpty($ScriptDrive)) { $ScriptDrive = "C:" }  # Fallback to C: if no drive detected
+$USMTPath = Join-Path $ScriptDrive "USMT\X64"
 $ScanState = Join-Path $USMTPath "scanstate.exe"
 $LoadState = Join-Path $USMTPath "loadstate.exe"
 $USMTStore = Join-Path $USMTPath "USMT_Store"
