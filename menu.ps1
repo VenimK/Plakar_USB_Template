@@ -111,10 +111,31 @@ if (!(Test-Path $Repo)) {
 # ------------------------------
 # USMT setup (dynamic USB path detection)
 # ------------------------------
-# Get the drive letter from the script's location (e.g., if script is on E:\, use E:\USMT\X64)
+# Try to find USMT in script directory first, then drive root
+$USMTPath = $null
+$PossiblePaths = @(
+    (Join-Path $ScriptDir "USMT\X64"),           # Same folder as script
+    (Join-Path $ScriptDir "..\USMT\X64")         # Parent folder
+)
+
+# Add drive root path if on Windows
 $ScriptDrive = Split-Path -Qualifier $ScriptDir
-if ([string]::IsNullOrEmpty($ScriptDrive)) { $ScriptDrive = "C:" }  # Fallback to C: if no drive detected
-$USMTPath = Join-Path $ScriptDrive "USMT\X64"
+if (-not [string]::IsNullOrEmpty($ScriptDrive)) {
+    $PossiblePaths += (Join-Path $ScriptDrive "USMT\X64")  # Drive root
+}
+
+# Find first valid USMT path
+foreach ($Path in $PossiblePaths) {
+    if (Test-Path (Join-Path $Path "scanstate.exe")) {
+        $USMTPath = $Path
+        break
+    }
+}
+
+# Fallback to script directory if not found
+if ([string]::IsNullOrEmpty($USMTPath)) {
+    $USMTPath = Join-Path $ScriptDir "USMT\X64"
+}
 $ScanState = Join-Path $USMTPath "scanstate.exe"
 $LoadState = Join-Path $USMTPath "loadstate.exe"
 $USMTStore = Join-Path $USMTPath "USMT_Store"
@@ -128,7 +149,14 @@ $MigDocsXML = Join-Path $USMTPath "migdocs.xml"
 # ------------------------------
 function Require-USMTCheck {
     if (-not (Test-Path $ScanState) -or -not (Test-Path $LoadState)) {
-        Write-Host "ERROR: scanstate.exe or loadstate.exe not found in $USMTPath" -ForegroundColor Red
+        Write-Host "ERROR: scanstate.exe or loadstate.exe not found!" -ForegroundColor Red
+        Write-Host "Searched in: $USMTPath" -ForegroundColor Yellow
+        Write-Host "" 
+        Write-Host "Place USMT files in one of these locations:" -ForegroundColor Cyan
+        Write-Host "  1. $ScriptDir\USMT\X64\" -ForegroundColor Gray
+        if (-not [string]::IsNullOrEmpty($ScriptDrive)) {
+            Write-Host "  2. $ScriptDrive\USMT\X64\" -ForegroundColor Gray
+        }
         Pause
         return $false
     }
