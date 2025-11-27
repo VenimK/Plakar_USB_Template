@@ -109,32 +109,41 @@ if (!(Test-Path $Repo)) {
 }
 
 # ------------------------------
-# USMT setup (dynamic USB path detection)
+# USMT setup (dynamic USB path detection + architecture detection)
 # ------------------------------
+# Detect system architecture
+$Arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "x86" }
+
 # Try to find USMT in script directory first, then drive root
 $USMTPath = $null
 $PossiblePaths = @(
-    (Join-Path $ScriptDir "USMT\X64"),           # Same folder as script
-    (Join-Path $ScriptDir "..\USMT\X64")         # Parent folder
+    (Join-Path $ScriptDir "USMT\$Arch"),         # Architecture-specific folder
+    (Join-Path $ScriptDir "USMT\X64"),           # Legacy X64 folder
+    (Join-Path $ScriptDir "USMT\amd64"),         # Standard amd64 folder
+    (Join-Path $ScriptDir "..\USMT\$Arch"),      # Parent folder
+    (Join-Path $ScriptDir "..\USMT\amd64")       # Parent folder (amd64)
 )
 
 # Add drive root path if on Windows
 $ScriptDrive = Split-Path -Qualifier $ScriptDir
 if (-not [string]::IsNullOrEmpty($ScriptDrive)) {
-    $PossiblePaths += (Join-Path $ScriptDrive "USMT\X64")  # Drive root
+    $PossiblePaths += (Join-Path $ScriptDrive "USMT\$Arch")
+    $PossiblePaths += (Join-Path $ScriptDrive "USMT\amd64")
+    $PossiblePaths += (Join-Path $ScriptDrive "USMT\X64")
 }
 
 # Find first valid USMT path
 foreach ($Path in $PossiblePaths) {
     if (Test-Path (Join-Path $Path "scanstate.exe")) {
         $USMTPath = $Path
+        Write-Host "Found USMT ($Arch) at: $USMTPath" -ForegroundColor Green
         break
     }
 }
 
 # Fallback to script directory if not found
 if ([string]::IsNullOrEmpty($USMTPath)) {
-    $USMTPath = Join-Path $ScriptDir "USMT\X64"
+    $USMTPath = Join-Path $ScriptDir "USMT\$Arch"
 }
 $ScanState = Join-Path $USMTPath "scanstate.exe"
 $LoadState = Join-Path $USMTPath "loadstate.exe"
@@ -149,14 +158,19 @@ $MigDocsXML = Join-Path $USMTPath "migdocs.xml"
 # ------------------------------
 function Require-USMTCheck {
     if (-not (Test-Path $ScanState) -or -not (Test-Path $LoadState)) {
-        Write-Host "ERROR: scanstate.exe or loadstate.exe not found!" -ForegroundColor Red
+        Write-Host "ERROR: USMT files not found!" -ForegroundColor Red
         Write-Host "Searched in: $USMTPath" -ForegroundColor Yellow
         Write-Host "" 
-        Write-Host "Place USMT files in one of these locations:" -ForegroundColor Cyan
-        Write-Host "  1. $ScriptDir\USMT\X64\" -ForegroundColor Gray
-        if (-not [string]::IsNullOrEmpty($ScriptDrive)) {
-            Write-Host "  2. $ScriptDrive\USMT\X64\" -ForegroundColor Gray
-        }
+        Write-Host "=== How to get USMT ===" -ForegroundColor Cyan
+        Write-Host "1. Download Windows ADK from:" -ForegroundColor White
+        Write-Host "   https://go.microsoft.com/fwlink/?linkid=2243390" -ForegroundColor Gray
+        Write-Host "2. Install and select only 'User State Migration Tool (USMT)'" -ForegroundColor White
+        Write-Host "3. Copy files from installation folder to USB:" -ForegroundColor White
+        Write-Host "   From: C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\USMT\$Arch\" -ForegroundColor Gray
+        Write-Host "   To:   $ScriptDir\USMT\$Arch\" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "Supported architectures: amd64 (64-bit), x86 (32-bit)" -ForegroundColor Yellow
+        Write-Host "Detected system: $Arch" -ForegroundColor Yellow
         Pause
         return $false
     }
