@@ -306,12 +306,14 @@ function ShowMenu {
     
     # Get repository info
     $repoInfo = Get-RepositoryInfo
+    $snapCount = $repoInfo.SnapshotCount
+    $repoSize = $repoInfo.SizeGB
     
     Write-Host "=========================================" -ForegroundColor Cyan
     Write-Host "     Plakar + USMT Technician Menu" -ForegroundColor White
     Write-Host "=========================================" -ForegroundColor Cyan
     Write-Host "Repository: " -NoNewline -ForegroundColor Gray
-    Write-Host "$($repoInfo.SnapshotCount) snapshots, $($repoInfo.SizeGB) GB" -ForegroundColor Yellow
+    Write-Host "$snapCount snapshots, $repoSize GB" -ForegroundColor Yellow
     Write-Host "=========================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "1. Backup user profile"
@@ -491,7 +493,9 @@ do {
             if ($storeInfo.Exists) {
                 Write-ColorMessage "WARNING: USMT store already exists!" "Warning"
                 Write-ColorMessage "Location: $USMTStore" "Info"
-                Write-ColorMessage "Size: $($storeInfo.SizeGB) GB, Files: $($storeInfo.FileCount)" "Info"
+                $existingSizeGB = $storeInfo.SizeGB
+                $existingFileCount = $storeInfo.FileCount
+                Write-ColorMessage "Size: $existingSizeGB GB, Files: $existingFileCount" "Info"
                 Write-Host ""
                 if (!(Confirm-Action "This will OVERWRITE the existing backup. Continue?")) {
                     Write-ColorMessage "Backup cancelled." "Info"
@@ -552,7 +556,9 @@ do {
                     
                     # Show store info
                     $newStoreInfo = Get-USMTStoreInfo -StorePath $USMTStore
-                    Write-ColorMessage "Backup size: $($newStoreInfo.SizeGB) GB ($($newStoreInfo.FileCount) files)" "Info"
+                    $sizeGB = $newStoreInfo.SizeGB
+                    $fileCount = $newStoreInfo.FileCount
+                    Write-ColorMessage "Backup size: $sizeGB GB ($fileCount files)" "Info"
                     Write-ColorMessage "Location: $USMTStore" "Info"
                     Write-Host ""
                     
@@ -603,8 +609,10 @@ do {
             $storeInfo = Get-USMTStoreInfo -StorePath $USMTStore
             Write-ColorMessage "USMT Store Information:" "Info"
             Write-ColorMessage "Location: $USMTStore" "Info"
-            Write-ColorMessage "Size: $($storeInfo.SizeGB) GB" "Info"
-            Write-ColorMessage "Files: $($storeInfo.FileCount)" "Info"
+            $storeSizeGB = $storeInfo.SizeGB
+            $storeFileCount = $storeInfo.FileCount
+            Write-ColorMessage "Size: $storeSizeGB GB" "Info"
+            Write-ColorMessage "Files: $storeFileCount" "Info"
             Write-Host ""
             
             # Validate store integrity
