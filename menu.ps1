@@ -11,6 +11,77 @@ if (-not $IsAdmin) {
 }
 
 # ------------------------------
+# Helper Functions
+# ------------------------------
+function Write-ColorMessage {
+    param(
+        [string]$Message,
+        [string]$Type = "Info"
+    )
+    switch ($Type) {
+        "Success" { Write-Host $Message -ForegroundColor Green }
+        "Error"   { Write-Host $Message -ForegroundColor Red }
+        "Warning" { Write-Host $Message -ForegroundColor Yellow }
+        "Info"    { Write-Host $Message -ForegroundColor Cyan }
+        default   { Write-Host $Message }
+    }
+}
+
+function Test-DiskSpace {
+    param([string]$Path, [long]$RequiredGB = 5)
+    try {
+        $Drive = (Get-Item $Path).PSDrive.Name
+        $FreeSpace = (Get-PSDrive $Drive).Free / 1GB
+        if ($FreeSpace -lt $RequiredGB) {
+            Write-ColorMessage "WARNING: Low disk space on drive $Drive`: $([math]::Round($FreeSpace,2)) GB free" "Warning"
+            return $false
+        }
+        return $true
+    } catch {
+        return $true  # Continue if check fails
+    }
+}
+
+function Get-RepositoryInfo {
+    try {
+        $output = & $PlakarExe $KeyOption at "$Repo" ls -tags 2>&1 | Out-String
+        $snapshotCount = ($output -split "`n" | Where-Object { $_ -match "\S" }).Count - 1
+        if ($snapshotCount -lt 0) { $snapshotCount = 0 }
+        
+        $repoSize = 0
+        if (Test-Path $Repo) {
+            $repoSize = (Get-ChildItem $Repo -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1GB
+        }
+        
+        return @{
+            SnapshotCount = $snapshotCount
+            SizeGB = [math]::Round($repoSize, 2)
+        }
+    } catch {
+        return @{ SnapshotCount = 0; SizeGB = 0 }
+    }
+}
+
+function Confirm-Action {
+    param([string]$Message)
+    $response = Read-Host "$Message (y/n)"
+    return $response -match '^[Yy]'
+}
+
+function Test-ValidPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        Write-ColorMessage "ERROR: Path cannot be empty." "Error"
+        return $false
+    }
+    if (!(Test-Path $Path)) {
+        Write-ColorMessage "ERROR: Path not found: $Path" "Error"
+        return $false
+    }
+    return $true
+}
+
+# ------------------------------
 # USMT user selection helpers
 # ------------------------------
 function Get-UserProfileNames {
@@ -27,10 +98,10 @@ function Get-UserProfileNames {
 function Select-USMTUsers {
     $names = Get-UserProfileNames
     if (-not $names -or $names.Count -eq 0) {
-        Write-Host "No user profiles found under C:\\Users" -ForegroundColor Yellow
+        Write-ColorMessage "No user profiles found under C:\\Users" "Warning"
         return @()
     }
-    Write-Host "Available user profiles:" -ForegroundColor Cyan
+    Write-ColorMessage "Available user profiles:" "Info"
     for ($i = 0; $i -lt $names.Count; $i++) {
         Write-Host ("  {0}. {1}" -f ($i+1), $names[$i])
     }
@@ -44,7 +115,7 @@ function Select-USMTUsers {
         }
     }
     if (-not $selected -or $selected.Count -eq 0) {
-        Write-Host "No users selected." -ForegroundColor Yellow
+        Write-ColorMessage "No users selected." "Warning"
         return @()
     }
     # Return fully-qualified local accounts for USMT /ui
@@ -64,6 +135,14 @@ $Repo = Join-Path $ScriptDir "plakar_repo"
 $PlakarExe = Join-Path $ScriptDir "plakar.exe"
 $KeyFile = Join-Path $ScriptDir ".plakar_key"
 
+# Check if plakar.exe exists
+if (!(Test-Path $PlakarExe)) {
+    Write-ColorMessage "ERROR: plakar.exe not found at: $PlakarExe" "Error"
+    Write-ColorMessage "Please ensure plakar.exe is in the same directory as this script." "Warning"
+    Pause
+    exit
+}
+
 # Handle keyfile setup before creating repository
 $NeedsPassphrase = $false
 if (!(Test-Path $KeyFile)) {
@@ -73,22 +152,26 @@ if (!(Test-Path $KeyFile)) {
     $KeyContent = Get-Content $KeyFile -Raw -ErrorAction SilentlyContinue
     if ($KeyContent -match 'CHANGE_THIS_PASSPHRASE' -or [string]::IsNullOrWhiteSpace($KeyContent)) {
         $NeedsPassphrase = $true
-        Write-Host "Placeholder passphrase detected in .plakar_key" -ForegroundColor Yellow
+        Write-ColorMessage "Placeholder passphrase detected in .plakar_key" "Warning"
     }
 }
 
 if ($NeedsPassphrase) {
-    Write-Host "Setting up passphrase for Plakar repository..." -ForegroundColor Yellow
-    Write-Host "Enter a passphrase (or press Enter for no passphrase):" -ForegroundColor Cyan
+    Write-ColorMessage "Setting up passphrase for Plakar repository..." "Warning"
+    Write-ColorMessage "" "Info"
+    Write-ColorMessage "SECURITY WARNING: Passphrase will be stored in PLAINTEXT in .plakar_key" "Warning"
+    Write-ColorMessage "For maximum security, store this USB drive in a secure location." "Warning"
+    Write-ColorMessage "" "Info"
+    Write-ColorMessage "Enter a passphrase (or press Enter for no passphrase):" "Info"
     $Passphrase = Read-Host -AsSecureString
     $PlainPassphrase = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Passphrase))
     
     if ($PlainPassphrase -ne "") {
-        # Save passphrase to .plakar_key
-        $PlainPassphrase | Out-File -FilePath $KeyFile -Encoding ASCII -NoNewline
-        Write-Host "Passphrase saved to .plakar_key" -ForegroundColor Green
+        # Save passphrase to .plakar_key with UTF8 encoding
+        $PlainPassphrase | Out-File -FilePath $KeyFile -Encoding UTF8 -NoNewline
+        Write-ColorMessage "Passphrase saved to .plakar_key" "Success"
     } else {
-        Write-Host "No passphrase set. Repository will be unencrypted." -ForegroundColor Yellow
+        Write-ColorMessage "No passphrase set. Repository will be unencrypted." "Warning"
         # Remove keyfile if user wants no passphrase
         if (Test-Path $KeyFile) { Remove-Item $KeyFile -Force }
     }
@@ -99,13 +182,18 @@ $KeyOption = if (Test-Path $KeyFile) { "--keyfile=`"$KeyFile`"" } else { "" }
 
 # Ensure Plakar repo exists
 if (!(Test-Path $Repo)) {
-    Write-Host "Creating Plakar repository at $Repo..." -ForegroundColor Cyan
-    & $PlakarExe $KeyOption at "$Repo" create
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: Failed to create Plakar repository." -ForegroundColor Red
+    Write-ColorMessage "Creating Plakar repository at $Repo..." "Info"
+    try {
+        & $PlakarExe $KeyOption at "$Repo" create
+        if ($LASTEXITCODE -ne 0) {
+            Write-ColorMessage "ERROR: Failed to create Plakar repository. Exit code: $LASTEXITCODE" "Error"
+            exit
+        }
+        Write-ColorMessage "Repository created successfully." "Success"
+    } catch {
+        Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
         exit
     }
-    Write-Host "Repository created successfully." -ForegroundColor Green
 }
 
 # ------------------------------
@@ -158,10 +246,10 @@ $MigDocsXML = Join-Path $USMTPath "migdocs.xml"
 # ------------------------------
 function Require-USMTCheck {
     if (-not (Test-Path $ScanState) -or -not (Test-Path $LoadState)) {
-        Write-Host "ERROR: USMT files not found!" -ForegroundColor Red
-        Write-Host "Searched in: $USMTPath" -ForegroundColor Yellow
+        Write-ColorMessage "ERROR: USMT files not found!" "Error"
+        Write-ColorMessage "Searched in: $USMTPath" "Warning"
         Write-Host "" 
-        Write-Host "=== How to get USMT ===" -ForegroundColor Cyan
+        Write-ColorMessage "=== How to get USMT ===" "Info"
         Write-Host "1. Download Windows ADK from:" -ForegroundColor White
         Write-Host "   https://go.microsoft.com/fwlink/?linkid=2243390" -ForegroundColor Gray
         Write-Host "2. Install and select only 'User State Migration Tool (USMT)'" -ForegroundColor White
@@ -169,13 +257,13 @@ function Require-USMTCheck {
         Write-Host "   From: C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\USMT\$Arch\" -ForegroundColor Gray
         Write-Host "   To:   $ScriptDir\USMT\$Arch\" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "Supported architectures: amd64 (64-bit), x86 (32-bit)" -ForegroundColor Yellow
-        Write-Host "Detected system: $Arch" -ForegroundColor Yellow
+        Write-ColorMessage "Supported architectures: amd64 (64-bit), x86 (32-bit)" "Warning"
+        Write-ColorMessage "Detected system: $Arch" "Warning"
         Pause
         return $false
     }
     if (-not (Test-Path $MigUserXML) -or -not (Test-Path $MigAppXML)) {
-        Write-Host "ERROR: miguser.xml or migapp.xml missing in $USMTPath" -ForegroundColor Red
+        Write-ColorMessage "ERROR: miguser.xml or migapp.xml missing in $USMTPath" "Error"
         Pause
         return $false
     }
@@ -187,40 +275,98 @@ function Require-USMTCheck {
 # ------------------------------
 function ShowMenu {
     Clear-Host
-    Write-Host "======================================="
-    Write-Host "     Plakar + USMT Technician Menu"
-    Write-Host "======================================="
+    
+    # Get repository info
+    $repoInfo = Get-RepositoryInfo
+    
+    Write-Host "=========================================" -ForegroundColor Cyan
+    Write-Host "     Plakar + USMT Technician Menu" -ForegroundColor White
+    Write-Host "=========================================" -ForegroundColor Cyan
+    Write-Host "Repository: " -NoNewline -ForegroundColor Gray
+    Write-Host "$($repoInfo.SnapshotCount) snapshots, $($repoInfo.SizeGB) GB" -ForegroundColor Yellow
+    Write-Host "=========================================" -ForegroundColor Cyan
+    Write-Host ""
     Write-Host "1. Backup user profile"
     Write-Host "2. Backup custom folder"
     Write-Host "3. Restore snapshot"
     Write-Host "4. List snapshots"
-    Write-Host "5. Start Plakar UI"
-    Write-Host "6. Delete snapshot"
-    Write-Host "7. USMT Backup (ScanState)"
-    Write-Host "8. USMT Restore (LoadState)"
-    Write-Host "9. Exit"
+    Write-Host "5. View snapshot details"
+    Write-Host "6. Start Plakar UI"
+    Write-Host "7. Delete snapshot"
+    Write-Host "8. USMT Backup (ScanState)"
+    Write-Host "9. USMT Restore (LoadState)"
+    Write-Host "10. Exit"
+    Write-Host ""
 }
 
 function PlakarBackup($Folder, $TagName) {
-    if ([string]::IsNullOrWhiteSpace($Folder)) { Write-Host "ERROR: Folder cannot be empty." -ForegroundColor Red; Pause; return }
-    if (!(Test-Path $Folder)) { Write-Host "ERROR: Folder not found: $Folder" -ForegroundColor Red; Pause; return }
+    # Validate inputs
+    if (![Test-ValidPath]$Folder) { Pause; return }
+    if ([string]::IsNullOrWhiteSpace($TagName)) {
+        Write-ColorMessage "ERROR: Tag name cannot be empty." "Error"
+        Pause
+        return
+    }
+
+    # Check disk space
+    Test-DiskSpace -Path $Repo | Out-Null
 
     $SnapTag = "${TagName}_$(Get-Date -Format yyyyMMdd_HHmmss)"
-    Write-Host "Starting backup: $SnapTag ..." -ForegroundColor Cyan
-    & $PlakarExe $KeyOption at "$Repo" backup -tag "$SnapTag" "$Folder"
-    if ($LASTEXITCODE -eq 0) { Write-Host "Backup completed." -ForegroundColor Green }
-    else { Write-Host "Backup FAILED." -ForegroundColor Red }
+    Write-ColorMessage "Starting backup: $SnapTag ..." "Info"
+    
+    try {
+        & $PlakarExe $KeyOption at "$Repo" backup -tag "$SnapTag" "$Folder"
+        if ($LASTEXITCODE -eq 0) { 
+            Write-ColorMessage "Backup completed successfully." "Success"
+        } else { 
+            Write-ColorMessage "Backup FAILED. Exit code: $LASTEXITCODE" "Error"
+        }
+    } catch {
+        Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
+    }
     Pause
 }
 
 function PlakarRestore($SnapTag, $RestoreTo) {
-    if ([string]::IsNullOrWhiteSpace($SnapTag)) { Write-Host "ERROR: Snapshot tag cannot be empty." -ForegroundColor Red; Pause; return }
-    if (!(Test-Path $RestoreTo)) { Write-Host "Creating restore folder: $RestoreTo" -ForegroundColor Cyan; New-Item -ItemType Directory -Path "$RestoreTo" | Out-Null }
+    # Validate inputs
+    if ([string]::IsNullOrWhiteSpace($SnapTag)) { 
+        Write-ColorMessage "ERROR: Snapshot tag cannot be empty." "Error"
+        Pause
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($RestoreTo)) { 
+        Write-ColorMessage "ERROR: Restore path cannot be empty." "Error"
+        Pause
+        return
+    }
 
-    Write-Host "Restoring snapshot $SnapTag ..." -ForegroundColor Cyan
-    & $PlakarExe $KeyOption at "$Repo" restore -tag "$SnapTag" -to "$RestoreTo"
-    if ($LASTEXITCODE -eq 0) { Write-Host "Restore completed." -ForegroundColor Green }
-    else { Write-Host "Restore FAILED." -ForegroundColor Red }
+    # Check disk space
+    Test-DiskSpace -Path (Split-Path $RestoreTo -Parent) | Out-Null
+
+    # Create restore folder if needed
+    if (!(Test-Path $RestoreTo)) { 
+        Write-ColorMessage "Creating restore folder: $RestoreTo" "Info"
+        try {
+            New-Item -ItemType Directory -Path "$RestoreTo" -ErrorAction Stop | Out-Null
+        } catch {
+            Write-ColorMessage "ERROR: Failed to create restore folder: $($_.Exception.Message)" "Error"
+            Pause
+            return
+        }
+    }
+
+    Write-ColorMessage "Restoring snapshot $SnapTag to $RestoreTo ..." "Info"
+    try {
+        & $PlakarExe $KeyOption at "$Repo" restore -tag "$SnapTag" -to "$RestoreTo"
+        if ($LASTEXITCODE -eq 0) { 
+            Write-ColorMessage "Restore completed successfully." "Success"
+            Write-ColorMessage "Files restored to: $RestoreTo" "Info"
+        } else { 
+            Write-ColorMessage "Restore FAILED. Exit code: $LASTEXITCODE" "Error"
+        }
+    } catch {
+        Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
+    }
     Pause
 }
 
@@ -234,45 +380,88 @@ do {
     switch ($Choice) {
 
         "1" {
+            Write-ColorMessage "Backup User Profile" "Info"
+            Write-Host "Example: C:\Users\JohnDoe" -ForegroundColor Gray
             $Folder = Read-Host "Enter profile path"
-            $Tag = Read-Host "Enter snapshot name"
+            $Tag = Read-Host "Enter snapshot name (e.g., UserProfile_JohnDoe)"
             PlakarBackup $Folder $Tag
         }
 
         "2" {
+            Write-ColorMessage "Backup Custom Folder" "Info"
+            Write-Host "Example: C:\Important\Documents" -ForegroundColor Gray
             $Folder = Read-Host "Enter folder path"
-            $Tag = Read-Host "Enter snapshot name"
+            $Tag = Read-Host "Enter snapshot name (e.g., MyDocuments)"
             PlakarBackup $Folder $Tag
         }
 
         "3" {
+            Write-ColorMessage "Restore Snapshot" "Info"
             & $PlakarExe $KeyOption at "$Repo" ls -tags
-            $SnapTag = Read-Host "Enter snapshot tag"
-            $RestoreTo = Read-Host "Enter restore folder"
+            Write-Host "" 
+            $SnapTag = Read-Host "Enter snapshot tag to restore"
+            Write-Host "Example: C:\Restored" -ForegroundColor Gray
+            $RestoreTo = Read-Host "Enter restore folder path"
             PlakarRestore $SnapTag $RestoreTo
         }
 
         "4" {
+            Write-ColorMessage "Listing all snapshots..." "Info"
             & $PlakarExe $KeyOption at "$Repo" ls -tags
             Pause
         }
 
         "5" {
-            Start-Process $PlakarExe -ArgumentList "$KeyOption at `"$Repo`" ui"
+            Write-ColorMessage "Listing snapshots..." "Info"
+            & $PlakarExe $KeyOption at "$Repo" ls -tags
+            $SnapTag = Read-Host "Enter snapshot tag to view details"
+            if (![string]::IsNullOrWhiteSpace($SnapTag)) {
+                Write-ColorMessage "`nSnapshot Details:" "Info"
+                & $PlakarExe $KeyOption at "$Repo" ls -snapshot $SnapTag
+            }
             Pause
         }
 
         "6" {
+            Write-ColorMessage "Starting Plakar UI..." "Info"
+            Start-Process $PlakarExe -ArgumentList "$KeyOption at `"$Repo`" ui"
+            Pause
+        }
+
+        "7" {
+            Write-ColorMessage "Listing snapshots..." "Info"
             & $PlakarExe $KeyOption at "$Repo" ls -tags
             $SnapTag = Read-Host "Enter tag to delete"
-            & $PlakarExe $KeyOption at "$Repo" rm -tag "$SnapTag" -apply
+            
+            if (![string]::IsNullOrWhiteSpace($SnapTag)) {
+                if (Confirm-Action "Are you sure you want to DELETE snapshot '$SnapTag'?") {
+                    Write-ColorMessage "Deleting snapshot..." "Warning"
+                    & $PlakarExe $KeyOption at "$Repo" rm -tag "$SnapTag" -apply
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-ColorMessage "Snapshot deleted successfully." "Success"
+                    } else {
+                        Write-ColorMessage "Failed to delete snapshot. Exit code: $LASTEXITCODE" "Error"
+                    }
+                } else {
+                    Write-ColorMessage "Delete operation cancelled." "Info"
+                }
+            } else {
+                Write-ColorMessage "No tag entered. Operation cancelled." "Warning"
+            }
             Pause
         }
 
         # USMT Backup
-        "7" {
+        "8" {
             if (-not (Require-USMTCheck)) { break }
-            if (!(Test-Path $USMTStore)) { New-Item -ItemType Directory -Path $USMTStore | Out-Null }
+            
+            # Check disk space
+            Test-DiskSpace -Path $USMTPath -RequiredGB 10 | Out-Null
+            
+            if (!(Test-Path $USMTStore)) { 
+                Write-ColorMessage "Creating USMT store directory..." "Info"
+                New-Item -ItemType Directory -Path $USMTStore | Out-Null 
+            }
 
             # Ask which user profiles to include
             $uiUsers = Select-USMTUsers
@@ -289,32 +478,61 @@ do {
             $args += "/v:5"
             $args += "/l:$ScanLog"
 
-            Write-Host "Running USMT ScanState for: $($uiUsers -join ', ')" -ForegroundColor Cyan
-            & $ScanState @args
-
-            if ($LASTEXITCODE -eq 0) { Write-Host "USMT Backup completed successfully." -ForegroundColor Green }
-            else { Write-Host "USMT Backup FAILED. Check log: $ScanLog" -ForegroundColor Red }
+            Write-ColorMessage "Running USMT ScanState for: $($uiUsers -join ', ')" "Info"
+            
+            try {
+                & $ScanState @args
+                if ($LASTEXITCODE -eq 0) { 
+                    Write-ColorMessage "USMT Backup completed successfully." "Success" 
+                } else { 
+                    Write-ColorMessage "USMT Backup FAILED. Exit code: $LASTEXITCODE" "Error"
+                    Write-ColorMessage "Check log: $ScanLog" "Warning"
+                }
+            } catch {
+                Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
+            }
 
             Pause
         }
 
         # USMT Restore
-        "8" {
+        "9" {
             if (-not (Require-USMTCheck)) { break }
+            
+            if (!(Test-Path $USMTStore)) {
+                Write-ColorMessage "ERROR: USMT store not found at $USMTStore" "Error"
+                Write-ColorMessage "Please run USMT Backup (option 8) first." "Warning"
+                Pause
+                break
+            }
 
-            Write-Host "Running USMT LoadState..." -ForegroundColor Cyan
-            & $LoadState "$USMTStore" "/i:$MigUserXML" "/i:$MigAppXML" "/i:$MigDocsXML" /c /lac /lae /v:5 "/l:$LoadLog"
-
-            if ($LASTEXITCODE -eq 0) { Write-Host "USMT Restore completed successfully." -ForegroundColor Green }
-            else { Write-Host "USMT Restore FAILED. Check log: $LoadLog" -ForegroundColor Red }
+            Write-ColorMessage "Running USMT LoadState..." "Info"
+            Write-ColorMessage "WARNING: This will restore user profiles and settings to this machine." "Warning"
+            
+            if (Confirm-Action "Continue with USMT restore?") {
+                try {
+                    & $LoadState "$USMTStore" "/i:$MigUserXML" "/i:$MigAppXML" "/i:$MigDocsXML" /c /lac /lae /v:5 "/l:$LoadLog"
+                    
+                    if ($LASTEXITCODE -eq 0) { 
+                        Write-ColorMessage "USMT Restore completed successfully." "Success" 
+                    } else { 
+                        Write-ColorMessage "USMT Restore FAILED. Exit code: $LASTEXITCODE" "Error"
+                        Write-ColorMessage "Check log: $LoadLog" "Warning"
+                    }
+                } catch {
+                    Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
+                }
+            } else {
+                Write-ColorMessage "USMT restore cancelled." "Info"
+            }
 
             Pause
         }
 
-        "9" { exit }
+        "10" { exit }
 
         default {
-            Write-Host "Invalid option." -ForegroundColor Yellow
+            Write-ColorMessage "Invalid option. Please choose 1-10." "Warning"
             Pause
         }
     }
