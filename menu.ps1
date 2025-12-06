@@ -311,7 +311,7 @@ do {
             Pause
         }
 
-        "9" { break }
+        "9" { exit }
 
         default {
             Write-Host "Invalid option." -ForegroundColor Yellow
