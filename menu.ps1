@@ -81,6 +81,34 @@ function Test-ValidPath {
     return $true
 }
 
+function Get-USMTStoreInfo {
+    param([string]$StorePath)
+    try {
+        if (!(Test-Path $StorePath)) {
+            return @{ Exists = $false; SizeGB = 0; FileCount = 0 }
+        }
+        $files = Get-ChildItem $StorePath -Recurse -File -ErrorAction SilentlyContinue
+        $size = ($files | Measure-Object -Property Length -Sum).Sum / 1GB
+        return @{
+            Exists = $true
+            SizeGB = [math]::Round($size, 2)
+            FileCount = $files.Count
+        }
+    } catch {
+        return @{ Exists = $false; SizeGB = 0; FileCount = 0 }
+    }
+}
+
+function Open-LogFile {
+    param([string]$LogPath)
+    if (Test-Path $LogPath) {
+        Write-ColorMessage "Opening log file..." "Info"
+        Start-Process notepad.exe -ArgumentList "$LogPath"
+    } else {
+        Write-ColorMessage "Log file not found: $LogPath" "Warning"
+    }
+}
+
 # ------------------------------
 # USMT user selection helpers
 # ------------------------------
@@ -455,9 +483,35 @@ do {
         "8" {
             if (-not (Require-USMTCheck)) { break }
             
-            # Check disk space
-            Test-DiskSpace -Path $USMTPath -RequiredGB 10 | Out-Null
+            Write-ColorMessage "=== USMT Backup (ScanState) ===" "Info"
+            Write-Host ""
             
+            # Check if store already exists
+            $storeInfo = Get-USMTStoreInfo -StorePath $USMTStore
+            if ($storeInfo.Exists) {
+                Write-ColorMessage "WARNING: USMT store already exists!" "Warning"
+                Write-ColorMessage "Location: $USMTStore" "Info"
+                Write-ColorMessage "Size: $($storeInfo.SizeGB) GB, Files: $($storeInfo.FileCount)" "Info"
+                Write-Host ""
+                if (!(Confirm-Action "This will OVERWRITE the existing backup. Continue?")) {
+                    Write-ColorMessage "Backup cancelled." "Info"
+                    Pause
+                    break
+                }
+                # Clean old store
+                Write-ColorMessage "Removing old USMT store..." "Warning"
+                Remove-Item -Path $USMTStore -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            
+            # Check disk space
+            if (!(Test-DiskSpace -Path $USMTPath -RequiredGB 10)) {
+                if (!(Confirm-Action "Low disk space detected. Continue anyway?")) {
+                    Pause
+                    break
+                }
+            }
+            
+            # Create store directory
             if (!(Test-Path $USMTStore)) { 
                 Write-ColorMessage "Creating USMT store directory..." "Info"
                 New-Item -ItemType Directory -Path $USMTStore | Out-Null 
@@ -467,6 +521,7 @@ do {
             $uiUsers = Select-USMTUsers
             if (-not $uiUsers -or $uiUsers.Count -eq 0) { Pause; break }
 
+            # Build arguments
             $args = @()
             $args += "$USMTStore"
             $args += "/i:$MigUserXML"
@@ -478,15 +533,49 @@ do {
             $args += "/v:5"
             $args += "/l:$ScanLog"
 
-            Write-ColorMessage "Running USMT ScanState for: $($uiUsers -join ', ')" "Info"
+            Write-Host ""
+            Write-ColorMessage "Starting USMT Backup..." "Info"
+            Write-ColorMessage "Users: $($uiUsers -join ', ')" "Info"
+            Write-ColorMessage "This may take several minutes..." "Warning"
+            Write-Host ""
+            
+            $startTime = Get-Date
             
             try {
                 & $ScanState @args
+                $elapsed = (Get-Date) - $startTime
+                Write-Host ""
+                
                 if ($LASTEXITCODE -eq 0) { 
-                    Write-ColorMessage "USMT Backup completed successfully." "Success" 
+                    Write-ColorMessage "✓ USMT Backup completed successfully!" "Success"
+                    Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
+                    
+                    # Show store info
+                    $newStoreInfo = Get-USMTStoreInfo -StorePath $USMTStore
+                    Write-ColorMessage "Backup size: $($newStoreInfo.SizeGB) GB ($($newStoreInfo.FileCount) files)" "Info"
+                    Write-ColorMessage "Location: $USMTStore" "Info"
+                    Write-Host ""
+                    
+                    # Offer to backup USMT store to Plakar
+                    if (Confirm-Action "Would you like to backup the USMT store to Plakar for extra safety?") {
+                        Write-ColorMessage "Backing up USMT store to Plakar..." "Info"
+                        $plakarTag = "USMT_Store_$(Get-Date -Format yyyyMMdd_HHmmss)"
+                        & $PlakarExe $KeyOption at "$Repo" backup -tag "$plakarTag" "$USMTStore"
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-ColorMessage "USMT store backed up to Plakar successfully!" "Success"
+                        } else {
+                            Write-ColorMessage "Failed to backup USMT store to Plakar." "Error"
+                        }
+                    }
                 } else { 
-                    Write-ColorMessage "USMT Backup FAILED. Exit code: $LASTEXITCODE" "Error"
-                    Write-ColorMessage "Check log: $ScanLog" "Warning"
+                    Write-ColorMessage "✗ USMT Backup FAILED!" "Error"
+                    Write-ColorMessage "Exit code: $LASTEXITCODE" "Error"
+                    Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
+                    Write-Host ""
+                    
+                    if (Confirm-Action "Would you like to view the log file?") {
+                        Open-LogFile -LogPath $ScanLog
+                    }
                 }
             } catch {
                 Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
@@ -499,31 +588,91 @@ do {
         "9" {
             if (-not (Require-USMTCheck)) { break }
             
+            Write-ColorMessage "=== USMT Restore (LoadState) ===" "Info"
+            Write-Host ""
+            
+            # Validate USMT store exists
             if (!(Test-Path $USMTStore)) {
                 Write-ColorMessage "ERROR: USMT store not found at $USMTStore" "Error"
                 Write-ColorMessage "Please run USMT Backup (option 8) first." "Warning"
                 Pause
                 break
             }
-
-            Write-ColorMessage "Running USMT LoadState..." "Info"
-            Write-ColorMessage "WARNING: This will restore user profiles and settings to this machine." "Warning"
             
-            if (Confirm-Action "Continue with USMT restore?") {
-                try {
-                    & $LoadState "$USMTStore" "/i:$MigUserXML" "/i:$MigAppXML" "/i:$MigDocsXML" /c /lac /lae /v:5 "/l:$LoadLog"
-                    
-                    if ($LASTEXITCODE -eq 0) { 
-                        Write-ColorMessage "USMT Restore completed successfully." "Success" 
-                    } else { 
-                        Write-ColorMessage "USMT Restore FAILED. Exit code: $LASTEXITCODE" "Error"
-                        Write-ColorMessage "Check log: $LoadLog" "Warning"
-                    }
-                } catch {
-                    Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
-                }
-            } else {
+            # Show store information
+            $storeInfo = Get-USMTStoreInfo -StorePath $USMTStore
+            Write-ColorMessage "USMT Store Information:" "Info"
+            Write-ColorMessage "Location: $USMTStore" "Info"
+            Write-ColorMessage "Size: $($storeInfo.SizeGB) GB" "Info"
+            Write-ColorMessage "Files: $($storeInfo.FileCount)" "Info"
+            Write-Host ""
+            
+            # Validate store integrity
+            if ($storeInfo.FileCount -eq 0) {
+                Write-ColorMessage "ERROR: USMT store appears to be empty or corrupted!" "Error"
+                Pause
+                break
+            }
+
+            Write-ColorMessage "WARNING: This will restore user profiles and settings to THIS machine!" "Warning"
+            Write-ColorMessage "This operation will:" "Warning"
+            Write-Host "  - Restore user profiles, documents, and settings" -ForegroundColor Yellow
+            Write-Host "  - May require a system reboot to complete" -ForegroundColor Yellow
+            Write-Host "  - Take several minutes to complete" -ForegroundColor Yellow
+            Write-Host ""
+            
+            if (!(Confirm-Action "Are you sure you want to continue with USMT restore?")) {
                 Write-ColorMessage "USMT restore cancelled." "Info"
+                Pause
+                break
+            }
+            
+            Write-Host ""
+            Write-ColorMessage "Starting USMT Restore..." "Info"
+            Write-ColorMessage "This may take several minutes..." "Warning"
+            Write-Host ""
+            
+            $startTime = Get-Date
+            
+            try {
+                & $LoadState "$USMTStore" "/i:$MigUserXML" "/i:$MigAppXML" "/i:$MigDocsXML" /c /lac /lae /v:5 "/l:$LoadLog"
+                $elapsed = (Get-Date) - $startTime
+                Write-Host ""
+                
+                if ($LASTEXITCODE -eq 0) { 
+                    Write-ColorMessage "✓ USMT Restore completed successfully!" "Success"
+                    Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
+                    Write-Host ""
+                    Write-ColorMessage "=== Post-Restore Instructions ===" "Info"
+                    Write-ColorMessage "1. Verify that user profiles are present" "Info"
+                    Write-ColorMessage "2. Check that user documents and settings were restored" "Info"
+                    Write-ColorMessage "3. REBOOT the system to complete the restore process" "Warning"
+                    Write-ColorMessage "4. Test user logins after reboot" "Info"
+                    Write-Host ""
+                    
+                    if (Confirm-Action "Would you like to reboot now?") {
+                        Write-ColorMessage "Rebooting in 10 seconds... (Press Ctrl+C to cancel)" "Warning"
+                        Start-Sleep -Seconds 10
+                        Restart-Computer -Force
+                    }
+                } else { 
+                    Write-ColorMessage "✗ USMT Restore FAILED!" "Error"
+                    Write-ColorMessage "Exit code: $LASTEXITCODE" "Error"
+                    Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
+                    Write-Host ""
+                    Write-ColorMessage "Common issues:" "Warning"
+                    Write-Host "  - User accounts may not exist on this system" -ForegroundColor Yellow
+                    Write-Host "  - Insufficient permissions (run as Administrator)" -ForegroundColor Yellow
+                    Write-Host "  - Disk space issues" -ForegroundColor Yellow
+                    Write-Host "  - Corrupted USMT store" -ForegroundColor Yellow
+                    Write-Host ""
+                    
+                    if (Confirm-Action "Would you like to view the log file?") {
+                        Open-LogFile -LogPath $LoadLog
+                    }
+                }
+            } catch {
+                Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
             }
 
             Pause
