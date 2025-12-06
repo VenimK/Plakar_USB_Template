@@ -551,7 +551,7 @@ do {
                 Write-Host ""
                 
                 if ($LASTEXITCODE -eq 0) { 
-                    Write-ColorMessage "✓ USMT Backup completed successfully!" "Success"
+                    Write-ColorMessage "[SUCCESS] USMT Backup completed successfully!" "Success"
                     Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
                     
                     # Show store info
@@ -574,7 +574,7 @@ do {
                         }
                     }
                 } else { 
-                    Write-ColorMessage "✗ USMT Backup FAILED!" "Error"
+                    Write-ColorMessage "[FAILED] USMT Backup FAILED!" "Error"
                     Write-ColorMessage "Exit code: $LASTEXITCODE" "Error"
                     Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
                     Write-Host ""
@@ -648,7 +648,7 @@ do {
                 Write-Host ""
                 
                 if ($LASTEXITCODE -eq 0) { 
-                    Write-ColorMessage "✓ USMT Restore completed successfully!" "Success"
+                    Write-ColorMessage "[SUCCESS] USMT Restore completed successfully!" "Success"
                     Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
                     Write-Host ""
                     Write-ColorMessage "=== Post-Restore Instructions ===" "Info"
@@ -664,7 +664,7 @@ do {
                         Restart-Computer -Force
                     }
                 } else { 
-                    Write-ColorMessage "✗ USMT Restore FAILED!" "Error"
+                    Write-ColorMessage "[FAILED] USMT Restore FAILED!" "Error"
                     Write-ColorMessage "Exit code: $LASTEXITCODE" "Error"
                     Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
                     Write-Host ""
