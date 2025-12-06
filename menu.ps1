@@ -301,7 +301,7 @@ function ShowMenu {
 
 function PlakarBackup($Folder, $TagName) {
     # Validate inputs
-    if (![Test-ValidPath]$Folder) { Pause; return }
+    if (!(Test-ValidPath $Folder)) { Pause; return }
     if ([string]::IsNullOrWhiteSpace($TagName)) {
         Write-ColorMessage "ERROR: Tag name cannot be empty." "Error"
         Pause
