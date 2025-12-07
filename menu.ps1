@@ -109,6 +109,56 @@ function Open-LogFile {
     }
 }
 
+function Get-AvailableUSMTStores {
+    param([string]$BasePath)
+    
+    try {
+        $stores = Get-ChildItem $BasePath -Directory -ErrorAction SilentlyContinue | 
+                  Where-Object { $_.Name -like "USMT_Store_*" } | 
+                  Sort-Object CreationTime -Descending
+        return $stores
+    } catch {
+        return @()
+    }
+}
+
+function Select-USMTStore {
+    param([string]$BasePath)
+    
+    $stores = Get-AvailableUSMTStores -BasePath $BasePath
+    
+    if (-not $stores -or $stores.Count -eq 0) {
+        Write-ColorMessage "No USMT stores found in $BasePath" "Warning"
+        return $null
+    }
+    
+    Write-ColorMessage "Available USMT Stores:" "Info"
+    Write-Host ""
+    
+    for ($i = 0; $i -lt $stores.Count; $i++) {
+        $store = $stores[$i]
+        $storeInfo = Get-USMTStoreInfo -StorePath $store.FullName
+        $sizeGB = $storeInfo.SizeGB
+        $created = $store.CreationTime.ToString('yyyy-MM-dd HH:mm')
+        
+        Write-Host ("  {0}. {1}" -f ($i+1), $store.Name) -ForegroundColor Cyan
+        Write-Host ("     Created: {0}, Size: {1} GB" -f $created, $sizeGB) -ForegroundColor Gray
+    }
+    
+    Write-Host ""
+    $choice = Read-Host "Select store number (1-$($stores.Count))"
+    
+    if ($choice -match '^[0-9]+$') {
+        $index = [int]$choice - 1
+        if ($index -ge 0 -and $index -lt $stores.Count) {
+            return $stores[$index].FullName
+        }
+    }
+    
+    Write-ColorMessage "Invalid selection." "Warning"
+    return $null
+}
+
 function Get-USMTStoreDetails {
     param([string]$StorePath)
     
@@ -566,25 +616,6 @@ do {
             Write-ColorMessage "=== USMT Backup (ScanState) ===" "Info"
             Write-Host ""
             
-            # Check if store already exists
-            $storeInfo = Get-USMTStoreInfo -StorePath $USMTStore
-            if ($storeInfo.Exists) {
-                Write-ColorMessage "WARNING: USMT store already exists!" "Warning"
-                Write-ColorMessage "Location: $USMTStore" "Info"
-                $existingSizeGB = $storeInfo.SizeGB
-                $existingFileCount = $storeInfo.FileCount
-                Write-ColorMessage "Size: $existingSizeGB GB, Files: $existingFileCount" "Info"
-                Write-Host ""
-                if (!(Confirm-Action "This will OVERWRITE the existing backup. Continue?")) {
-                    Write-ColorMessage "Backup cancelled." "Info"
-                    Pause
-                    break
-                }
-                # Clean old store
-                Write-ColorMessage "Removing old USMT store..." "Warning"
-                Remove-Item -Path $USMTStore -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            
             # Check disk space
             if (!(Test-DiskSpace -Path $USMTPath -RequiredGB 10)) {
                 if (!(Confirm-Action "Low disk space detected. Continue anyway?")) {
@@ -592,20 +623,31 @@ do {
                     break
                 }
             }
-            
-            # Create store directory
-            if (!(Test-Path $USMTStore)) { 
-                Write-ColorMessage "Creating USMT store directory..." "Info"
-                New-Item -ItemType Directory -Path $USMTStore | Out-Null 
-            }
 
             # Ask which user profiles to include
             $uiUsers = Select-USMTUsers
             if (-not $uiUsers -or $uiUsers.Count -eq 0) { Pause; break }
+            
+            # Create unique store name based on users and timestamp
+            $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+            $userNames = $uiUsers | ForEach-Object { ($_ -split '\\')[-1] }
+            $userNamesList = ($userNames | Select-Object -First 2) -join "_"
+            if ($userNames.Count -gt 2) { $userNamesList += "_etc" }
+            $storeName = "USMT_Store_$userNamesList`_$timestamp"
+            $currentStore = Join-Path $USMTPath $storeName
+            
+            Write-ColorMessage "Store name: $storeName" "Info"
+            Write-Host ""
+            
+            # Create store directory
+            if (!(Test-Path $currentStore)) { 
+                Write-ColorMessage "Creating USMT store directory..." "Info"
+                New-Item -ItemType Directory -Path $currentStore | Out-Null 
+            }
 
             # Build arguments
             $args = @()
-            $args += "$USMTStore"
+            $args += "$currentStore"
             $args += "/i:$MigUserXML"
             $args += "/i:$MigAppXML"
             $args += "/i:$MigDocsXML"
@@ -633,18 +675,18 @@ do {
                     Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
                     
                     # Show store info
-                    $newStoreInfo = Get-USMTStoreInfo -StorePath $USMTStore
+                    $newStoreInfo = Get-USMTStoreInfo -StorePath $currentStore
                     $sizeGB = $newStoreInfo.SizeGB
                     $fileCount = $newStoreInfo.FileCount
                     Write-ColorMessage "Backup size: $sizeGB GB ($fileCount files)" "Info"
-                    Write-ColorMessage "Location: $USMTStore" "Info"
+                    Write-ColorMessage "Location: $currentStore" "Info"
                     Write-Host ""
                     
                     # Offer to backup USMT store to Plakar
                     if (Confirm-Action "Would you like to backup the USMT store to Plakar for extra safety?") {
                         Write-ColorMessage "Backing up USMT store to Plakar..." "Info"
-                        $plakarTag = "USMT_Store_$(Get-Date -Format yyyyMMdd_HHmmss)"
-                        & $PlakarExe $KeyOption at "$Repo" backup -tag "$plakarTag" "$USMTStore"
+                        $plakarTag = $storeName
+                        & $PlakarExe $KeyOption at "$Repo" backup -tag "$plakarTag" "$currentStore"
                         if ($LASTEXITCODE -eq 0) {
                             Write-ColorMessage "USMT store backed up to Plakar successfully!" "Success"
                         } else {
@@ -675,18 +717,19 @@ do {
             Write-ColorMessage "=== USMT Restore (LoadState) ===" "Info"
             Write-Host ""
             
-            # Validate USMT store exists
-            if (!(Test-Path $USMTStore)) {
-                Write-ColorMessage "ERROR: USMT store not found at $USMTStore" "Error"
-                Write-ColorMessage "Please run USMT Backup (option 8) first." "Warning"
+            # Let user select from available stores
+            $selectedStore = Select-USMTStore -BasePath $USMTPath
+            if (-not $selectedStore) {
+                Write-ColorMessage "No store selected. Operation cancelled." "Warning"
                 Pause
                 break
             }
             
+            Write-Host ""
             # Show store information
-            $storeInfo = Get-USMTStoreInfo -StorePath $USMTStore
-            Write-ColorMessage "USMT Store Information:" "Info"
-            Write-ColorMessage "Location: $USMTStore" "Info"
+            $storeInfo = Get-USMTStoreInfo -StorePath $selectedStore
+            Write-ColorMessage "Selected Store Information:" "Info"
+            Write-ColorMessage "Location: $selectedStore" "Info"
             $storeSizeGB = $storeInfo.SizeGB
             $storeFileCount = $storeInfo.FileCount
             Write-ColorMessage "Size: $storeSizeGB GB" "Info"
@@ -721,7 +764,7 @@ do {
             $startTime = Get-Date
             
             try {
-                & $LoadState "$USMTStore" "/i:$MigUserXML" "/i:$MigAppXML" "/i:$MigDocsXML" /c /lac /lae /v:5 "/l:$LoadLog"
+                & $LoadState "$selectedStore" "/i:$MigUserXML" "/i:$MigAppXML" "/i:$MigDocsXML" /c /lac /lae /v:5 "/l:$LoadLog"
                 $elapsed = (Get-Date) - $startTime
                 Write-Host ""
                 
@@ -765,11 +808,10 @@ do {
         }
 
         "10" {
-            if (!(Test-Path $USMTStore)) {
-                Write-ColorMessage "ERROR: USMT store not found at $USMTStore" "Error"
-                Write-ColorMessage "Please run USMT Backup (option 8) first." "Warning"
-            } else {
-                Get-USMTStoreDetails -StorePath $USMTStore
+            # Let user select from available stores
+            $selectedStore = Select-USMTStore -BasePath $USMTPath
+            if ($selectedStore) {
+                Get-USMTStoreDetails -StorePath $selectedStore
             }
             Pause
         }
