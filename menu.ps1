@@ -109,6 +109,82 @@ function Open-LogFile {
     }
 }
 
+function Get-USMTStoreDetails {
+    param([string]$StorePath)
+    
+    if (!(Test-Path $StorePath)) {
+        Write-ColorMessage "ERROR: USMT store not found at $StorePath" "Error"
+        return
+    }
+    
+    Write-ColorMessage "=== USMT Store Details ===" "Info"
+    Write-Host ""
+    
+    # Basic store info
+    $storeInfo = Get-USMTStoreInfo -StorePath $StorePath
+    $sizeGB = $storeInfo.SizeGB
+    $fileCount = $storeInfo.FileCount
+    
+    Write-ColorMessage "Location: $StorePath" "Info"
+    Write-ColorMessage "Size: $sizeGB GB" "Info"
+    Write-ColorMessage "Files: $fileCount" "Info"
+    Write-Host ""
+    
+    # Try to read migration XML files for metadata
+    try {
+        $catalogFile = Join-Path $StorePath "USMT\USMT.MIG"
+        if (Test-Path $catalogFile) {
+            Write-ColorMessage "Store catalog file found" "Success"
+        }
+        
+        # List key files in store
+        Write-ColorMessage "Store Contents:" "Info"
+        $usmtFolder = Join-Path $StorePath "USMT"
+        if (Test-Path $usmtFolder) {
+            $migFiles = Get-ChildItem $usmtFolder -File | Select-Object -First 10
+            foreach ($file in $migFiles) {
+                $fileSizeMB = [math]::Round($file.Length / 1MB, 2)
+                Write-Host "  - $($file.Name) ($fileSizeMB MB)" -ForegroundColor Gray
+            }
+            
+            $totalFiles = (Get-ChildItem $usmtFolder -File).Count
+            if ($totalFiles -gt 10) {
+                Write-Host "  ... and $($totalFiles - 10) more files" -ForegroundColor Gray
+            }
+        }
+        Write-Host ""
+        
+        # Check for control files
+        Write-ColorMessage "Migration Metadata:" "Info"
+        
+        $controlFile = Join-Path $StorePath "USMT\Config.xml"
+        if (Test-Path $controlFile) {
+            Write-Host "  - Configuration: Found" -ForegroundColor Green
+        }
+        
+        # List backed up users based on folder structure
+        $userFolders = Get-ChildItem $StorePath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "USMT" }
+        if ($userFolders) {
+            Write-Host ""
+            Write-ColorMessage "Backed Up Users/Data:" "Info"
+            foreach ($folder in $userFolders) {
+                $folderSizeGB = [math]::Round(((Get-ChildItem $folder.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1GB), 2)
+                Write-Host "  - $($folder.Name) ($folderSizeGB GB)" -ForegroundColor Cyan
+            }
+        }
+        
+        # Show creation date
+        $storeCreated = (Get-Item $StorePath).CreationTime
+        Write-Host ""
+        Write-ColorMessage "Store Created: $($storeCreated.ToString('yyyy-MM-dd HH:mm:ss'))" "Info"
+        
+    } catch {
+        Write-ColorMessage "Could not read detailed metadata: $($_.Exception.Message)" "Warning"
+    }
+    
+    Write-Host ""
+}
+
 # ------------------------------
 # USMT user selection helpers
 # ------------------------------
@@ -263,6 +339,7 @@ if ([string]::IsNullOrEmpty($USMTPath)) {
 }
 $ScanState = Join-Path $USMTPath "scanstate.exe"
 $LoadState = Join-Path $USMTPath "loadstate.exe"
+$USMTUtils = Join-Path $USMTPath "usmtutils.exe"
 $USMTStore = Join-Path $USMTPath "USMT_Store"
 $ScanLog = Join-Path $USMTPath "scanstate.log"
 $LoadLog = Join-Path $USMTPath "loadstate.log"
@@ -325,7 +402,8 @@ function ShowMenu {
     Write-Host "7. Delete snapshot"
     Write-Host "8. USMT Backup (ScanState)"
     Write-Host "9. USMT Restore (LoadState)"
-    Write-Host "10. Exit"
+    Write-Host "10. View USMT Store Details"
+    Write-Host "11. Exit"
     Write-Host ""
 }
 
@@ -686,10 +764,20 @@ do {
             Pause
         }
 
-        "10" { exit }
+        "10" {
+            if (!(Test-Path $USMTStore)) {
+                Write-ColorMessage "ERROR: USMT store not found at $USMTStore" "Error"
+                Write-ColorMessage "Please run USMT Backup (option 8) first." "Warning"
+            } else {
+                Get-USMTStoreDetails -StorePath $USMTStore
+            }
+            Pause
+        }
+
+        "11" { exit }
 
         default {
-            Write-ColorMessage "Invalid option. Please choose 1-10." "Warning"
+            Write-ColorMessage "Invalid option. Please choose 1-11." "Warning"
             Pause
         }
     }
