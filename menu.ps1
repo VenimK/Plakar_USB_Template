@@ -109,8 +109,8 @@ function Open-LogFile {
     }
 }
 
-function Open-ClientDetailsSite {
-    $url = "https://prompt.nas86.eu"
+function Open-PrivateUrl {
+    param([Parameter(Mandatory = $true)][string]$Url)
 
     # Prefer Edge, then Chrome. Fall back to default browser (may not be private).
     $edgeCandidates = @(
@@ -122,7 +122,7 @@ function Open-ClientDetailsSite {
     foreach ($edge in $edgeCandidates) {
         if (Test-Path $edge) {
             Write-ColorMessage "Opening client details in Microsoft Edge (InPrivate)..." "Info"
-            Start-Process -FilePath $edge -ArgumentList @("-inprivate", $url)
+            Start-Process -FilePath $edge -ArgumentList @("-inprivate", $Url)
             return
         }
     }
@@ -136,13 +136,13 @@ function Open-ClientDetailsSite {
     foreach ($chrome in $chromeCandidates) {
         if (Test-Path $chrome) {
             Write-ColorMessage "Opening client details in Google Chrome (Incognito)..." "Info"
-            Start-Process -FilePath $chrome -ArgumentList @("--incognito", $url)
+            Start-Process -FilePath $chrome -ArgumentList @("--incognito", $Url)
             return
         }
     }
 
     Write-ColorMessage "Edge/Chrome not found. Opening default browser (not guaranteed private)..." "Warning"
-    Start-Process $url
+    Start-Process $Url
 }
 
 function Get-AvailableUSMTStores {
@@ -492,7 +492,8 @@ function ShowMenu {
     Write-Host "10. USMT Restore (LoadState)"
     Write-Host "11. View USMT Store Details"
     Write-Host "12. Client Details (Private Browser)"
-    Write-Host "13. Exit"
+    Write-Host "13. Technician Portal (Private Browser)"
+    Write-Host "14. Exit"
     Write-Host ""
 }
 
@@ -1036,14 +1037,19 @@ do {
         }
 
         "12" {
-            Open-ClientDetailsSite
+            Open-PrivateUrl -Url "https://prompt.nas86.eu"
             Pause
         }
 
-        "13" { exit }
+        "13" {
+            Open-PrivateUrl -Url "https://prompt.nas86.eu/technician"
+            Pause
+        }
+
+        "14" { exit }
 
         default {
-            Write-ColorMessage "Invalid option. Please choose 1-13." "Warning"
+            Write-ColorMessage "Invalid option. Please choose 1-14." "Warning"
             Pause
         }
     }
