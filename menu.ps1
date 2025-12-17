@@ -396,6 +396,7 @@ $LoadLog = Join-Path $USMTPath "loadstate.log"
 $MigUserXML = Join-Path $USMTPath "miguser.xml"
 $MigAppXML = Join-Path $USMTPath "migapp.xml"
 $MigDocsXML = Join-Path $USMTPath "migdocs.xml"
+
 # ------------------------------
 # Check USMT prerequisites
 # ------------------------------
@@ -451,9 +452,10 @@ function ShowMenu {
     Write-Host "6. Start Plakar UI"
     Write-Host "7. Delete snapshot"
     Write-Host "8. USMT Backup (ScanState)"
-    Write-Host "9. USMT Restore (LoadState)"
-    Write-Host "10. View USMT Store Details"
-    Write-Host "11. Exit"
+    Write-Host "9. USMT Offline Backup (ScanState)"
+    Write-Host "10. USMT Restore (LoadState)"
+    Write-Host "11. View USMT Store Details"
+    Write-Host "12. Exit"
     Write-Host ""
 }
 
@@ -526,6 +528,34 @@ function PlakarRestore($SnapTag, $RestoreTo) {
         Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
     }
     Pause
+}
+
+function Find-OfflineWindowsDirs {
+    $found = @()
+    try {
+        $drives = Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue
+        foreach ($d in $drives) {
+            $winDir = Join-Path $d.Root "Windows"
+            $cfg = Join-Path $winDir "System32\\config"
+            if (Test-Path $cfg) {
+                $found += $winDir
+            }
+        }
+    } catch {
+        return @()
+    }
+    return $found | Select-Object -Unique
+}
+
+function Test-OfflineWindowsDir {
+    param([string]$WindowsDir)
+    if ([string]::IsNullOrWhiteSpace($WindowsDir)) { return $false }
+    if (!(Test-Path $WindowsDir)) { return $false }
+    $cfg = Join-Path $WindowsDir "System32\\config"
+    if (!(Test-Path $cfg)) { return $false }
+    $systemHive = Join-Path $cfg "SYSTEM"
+    $softwareHive = Join-Path $cfg "SOFTWARE"
+    return (Test-Path $systemHive) -and (Test-Path $softwareHive)
 }
 
 # ------------------------------
@@ -710,8 +740,114 @@ do {
             Pause
         }
 
-        # USMT Restore
+        # USMT Offline Backup
         "9" {
+            if (-not (Require-USMTCheck)) { break }
+
+            Write-ColorMessage "=== USMT Offline Backup (ScanState) ===" "Info"
+            Write-Host ""
+            Write-ColorMessage "This captures user profiles/settings from an OFFLINE Windows installation (e.g. old disk mounted as D:\\)." "Warning"
+            Write-ColorMessage "Run from WinPE or another OS when the source Windows is not booted." "Warning"
+            Write-Host ""
+
+            $candidates = Find-OfflineWindowsDirs
+            if ($candidates -and $candidates.Count -gt 0) {
+                Write-ColorMessage "Detected offline Windows folders:" "Info"
+                for ($i = 0; $i -lt $candidates.Count; $i++) {
+                    Write-Host ("  {0}. {1}" -f ($i + 1), $candidates[$i]) -ForegroundColor Cyan
+                }
+                Write-Host ""
+            }
+
+            Write-Host "Example: D:\\Windows" -ForegroundColor Gray
+            $offlineWinDir = Read-Host "Enter OFFLINE Windows directory"
+
+            if (-not (Test-OfflineWindowsDir -WindowsDir $offlineWinDir)) {
+                Write-ColorMessage "ERROR: Invalid offline Windows directory: $offlineWinDir" "Error"
+                Write-ColorMessage "Expected to find: <WindowsDir>\\System32\\config\\SYSTEM" "Warning"
+                Pause
+                break
+            }
+
+            if (!(Test-DiskSpace -Path $USMTPath -RequiredGB 10)) {
+                if (!(Confirm-Action "Low disk space detected. Continue anyway?")) {
+                    Pause
+                    break
+                }
+            }
+
+            $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+            $storeName = "USMT_Offline_Store_$timestamp"
+            $currentStore = Join-Path $USMTPath $storeName
+
+            Write-ColorMessage "Store name: $storeName" "Info"
+            Write-ColorMessage "Offline Windows: $offlineWinDir" "Info"
+            Write-Host ""
+
+            if (!(Test-Path $currentStore)) { 
+                Write-ColorMessage "Creating USMT store directory..." "Info"
+                New-Item -ItemType Directory -Path $currentStore | Out-Null
+            }
+
+            $args = @()
+            $args += "$currentStore"
+            $args += "/i:$MigUserXML"
+            $args += "/i:$MigAppXML"
+            $args += "/i:$MigDocsXML"
+            $args += "/offlineWinDir:$offlineWinDir"
+            $args += "/all"
+            $args += "/o"
+            $args += "/c"
+            $args += "/v:5"
+            $args += "/l:$ScanLog"
+
+            Write-ColorMessage "Starting USMT Offline Backup..." "Info"
+            Write-ColorMessage "This may take several minutes..." "Warning"
+            Write-Host ""
+
+            $startTime = Get-Date
+            try {
+                & $ScanState @args
+                $elapsed = (Get-Date) - $startTime
+                Write-Host ""
+
+                if ($LASTEXITCODE -eq 0) {
+                    Write-ColorMessage "[SUCCESS] USMT Offline Backup completed successfully!" "Success"
+                    Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
+                    $newStoreInfo = Get-USMTStoreInfo -StorePath $currentStore
+                    Write-ColorMessage "Backup size: $($newStoreInfo.SizeGB) GB ($($newStoreInfo.FileCount) files)" "Info"
+                    Write-ColorMessage "Location: $currentStore" "Info"
+                    Write-Host ""
+
+                    if (Confirm-Action "Would you like to backup the USMT store to Plakar for extra safety?") {
+                        Write-ColorMessage "Backing up USMT store to Plakar..." "Info"
+                        $plakarTag = $storeName
+                        & $PlakarExe $KeyOption at "$Repo" backup -tag "$plakarTag" "$currentStore"
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-ColorMessage "USMT store backed up to Plakar successfully!" "Success"
+                        } else {
+                            Write-ColorMessage "Failed to backup USMT store to Plakar." "Error"
+                        }
+                    }
+                } else {
+                    Write-ColorMessage "[FAILED] USMT Offline Backup FAILED!" "Error"
+                    Write-ColorMessage "Exit code: $LASTEXITCODE" "Error"
+                    Write-ColorMessage "Time elapsed: $([math]::Round($elapsed.TotalMinutes, 1)) minutes" "Info"
+                    Write-Host ""
+
+                    if (Confirm-Action "Would you like to view the log file?") {
+                        Open-LogFile -LogPath $ScanLog
+                    }
+                }
+            } catch {
+                Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
+            }
+
+            Pause
+        }
+
+        # USMT Restore
+        "10" {
             if (-not (Require-USMTCheck)) { break }
             
             Write-ColorMessage "=== USMT Restore (LoadState) ===" "Info"
@@ -807,7 +943,7 @@ do {
             Pause
         }
 
-        "10" {
+        "11" {
             # Let user select from available stores
             $selectedStore = Select-USMTStore -BasePath $USMTPath
             if ($selectedStore) {
@@ -816,10 +952,10 @@ do {
             Pause
         }
 
-        "11" { exit }
+        "12" { exit }
 
         default {
-            Write-ColorMessage "Invalid option. Please choose 1-11." "Warning"
+            Write-ColorMessage "Invalid option. Please choose 1-12." "Warning"
             Pause
         }
     }
