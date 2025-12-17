@@ -109,6 +109,42 @@ function Open-LogFile {
     }
 }
 
+function Open-ClientDetailsSite {
+    $url = "https://prompt.nas86.eu"
+
+    # Prefer Edge, then Chrome. Fall back to default browser (may not be private).
+    $edgeCandidates = @(
+        (Get-Command "msedge.exe" -ErrorAction SilentlyContinue).Source,
+        "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe",
+        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    foreach ($edge in $edgeCandidates) {
+        if (Test-Path $edge) {
+            Write-ColorMessage "Opening client details in Microsoft Edge (InPrivate)..." "Info"
+            Start-Process -FilePath $edge -ArgumentList @("-inprivate", $url)
+            return
+        }
+    }
+
+    $chromeCandidates = @(
+        (Get-Command "chrome.exe" -ErrorAction SilentlyContinue).Source,
+        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+        "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe"
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    foreach ($chrome in $chromeCandidates) {
+        if (Test-Path $chrome) {
+            Write-ColorMessage "Opening client details in Google Chrome (Incognito)..." "Info"
+            Start-Process -FilePath $chrome -ArgumentList @("--incognito", $url)
+            return
+        }
+    }
+
+    Write-ColorMessage "Edge/Chrome not found. Opening default browser (not guaranteed private)..." "Warning"
+    Start-Process $url
+}
+
 function Get-AvailableUSMTStores {
     param([string]$BasePath)
     
@@ -455,7 +491,8 @@ function ShowMenu {
     Write-Host "9. USMT Offline Backup (ScanState)"
     Write-Host "10. USMT Restore (LoadState)"
     Write-Host "11. View USMT Store Details"
-    Write-Host "12. Exit"
+    Write-Host "12. Client Details (Private Browser)"
+    Write-Host "13. Exit"
     Write-Host ""
 }
 
@@ -998,10 +1035,15 @@ do {
             Pause
         }
 
-        "12" { exit }
+        "12" {
+            Open-ClientDetailsSite
+            Pause
+        }
+
+        "13" { exit }
 
         default {
-            Write-ColorMessage "Invalid option. Please choose 1-12." "Warning"
+            Write-ColorMessage "Invalid option. Please choose 1-13." "Warning"
             Pause
         }
     }
