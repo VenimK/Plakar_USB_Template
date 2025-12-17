@@ -665,6 +665,7 @@ do {
             if ($userNames.Count -gt 2) { $userNamesList += "_etc" }
             $storeName = "USMT_Store_$userNamesList`_$timestamp"
             $currentStore = Join-Path $USMTPath $storeName
+            $currentScanLog = Join-Path $currentStore "scanstate.log"
             
             Write-ColorMessage "Store name: $storeName" "Info"
             Write-Host ""
@@ -674,6 +675,13 @@ do {
                 Write-ColorMessage "Creating USMT store directory..." "Info"
                 New-Item -ItemType Directory -Path $currentStore | Out-Null 
             }
+
+            # Ensure a writable working directory for USMT
+            $usmtWorkingDir = Join-Path $currentStore "_work"
+            if (!(Test-Path $usmtWorkingDir)) {
+                New-Item -ItemType Directory -Path $usmtWorkingDir | Out-Null
+            }
+            $env:USMT_WORKING_DIR = $usmtWorkingDir
 
             # Build arguments
             $args = @()
@@ -685,7 +693,7 @@ do {
             $args += "/o"
             $args += "/c"
             $args += "/v:5"
-            $args += "/l:$ScanLog"
+            $args += "/l:$currentScanLog"
 
             Write-Host ""
             Write-ColorMessage "Starting USMT Backup..." "Info"
@@ -730,7 +738,7 @@ do {
                     Write-Host ""
                     
                     if (Confirm-Action "Would you like to view the log file?") {
-                        Open-LogFile -LogPath $ScanLog
+                        Open-LogFile -LogPath $currentScanLog
                     }
                 }
             } catch {
@@ -779,6 +787,7 @@ do {
             $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
             $storeName = "USMT_Offline_Store_$timestamp"
             $currentStore = Join-Path $USMTPath $storeName
+            $currentScanLog = Join-Path $currentStore "scanstate.log"
 
             Write-ColorMessage "Store name: $storeName" "Info"
             Write-ColorMessage "Offline Windows: $offlineWinDir" "Info"
@@ -788,6 +797,13 @@ do {
                 Write-ColorMessage "Creating USMT store directory..." "Info"
                 New-Item -ItemType Directory -Path $currentStore | Out-Null
             }
+
+            # Ensure a writable working directory for USMT (common fix for return code 29)
+            $usmtWorkingDir = Join-Path $currentStore "_work"
+            if (!(Test-Path $usmtWorkingDir)) {
+                New-Item -ItemType Directory -Path $usmtWorkingDir | Out-Null
+            }
+            $env:USMT_WORKING_DIR = $usmtWorkingDir
 
             $args = @()
             $args += "$currentStore"
@@ -799,7 +815,7 @@ do {
             $args += "/o"
             $args += "/c"
             $args += "/v:5"
-            $args += "/l:$ScanLog"
+            $args += "/l:$currentScanLog"
 
             Write-ColorMessage "Starting USMT Offline Backup..." "Info"
             Write-ColorMessage "This may take several minutes..." "Warning"
@@ -836,7 +852,7 @@ do {
                     Write-Host ""
 
                     if (Confirm-Action "Would you like to view the log file?") {
-                        Open-LogFile -LogPath $ScanLog
+                        Open-LogFile -LogPath $currentScanLog
                     }
                 }
             } catch {
