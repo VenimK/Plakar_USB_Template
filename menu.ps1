@@ -684,16 +684,16 @@ do {
             $env:USMT_WORKING_DIR = $usmtWorkingDir
 
             # Build arguments
-            $args = @()
-            $args += "$currentStore"
-            $args += "/i:$MigUserXML"
-            $args += "/i:$MigAppXML"
-            $args += "/i:$MigDocsXML"
-            foreach ($u in $uiUsers) { $args += "/ui:$u" }
-            $args += "/o"
-            $args += "/c"
-            $args += "/v:5"
-            $args += "/l:$currentScanLog"
+            $scanArgs = @()
+            $scanArgs += "$currentStore"
+            $scanArgs += "/i:$MigUserXML"
+            $scanArgs += "/i:$MigAppXML"
+            $scanArgs += "/i:$MigDocsXML"
+            foreach ($u in $uiUsers) { $scanArgs += "/ui:$u" }
+            $scanArgs += "/o"
+            $scanArgs += "/c"
+            $scanArgs += "/v:5"
+            $scanArgs += "/l:$currentScanLog"
 
             Write-Host ""
             Write-ColorMessage "Starting USMT Backup..." "Info"
@@ -704,7 +704,7 @@ do {
             $startTime = Get-Date
             
             try {
-                & $ScanState @args
+                & $ScanState @scanArgs
                 $elapsed = (Get-Date) - $startTime
                 Write-Host ""
                 
@@ -770,6 +770,20 @@ do {
             Write-Host "Example: D:\\Windows" -ForegroundColor Gray
             $offlineWinDir = Read-Host "Enter OFFLINE Windows directory"
 
+            # Guardrail: offline migrations must NOT target the currently running OS
+            try {
+                $currentWinDir = [System.IO.Path]::GetFullPath($env:SystemRoot)
+                $inputWinDir = [System.IO.Path]::GetFullPath($offlineWinDir)
+                if ($inputWinDir.TrimEnd('\\') -ieq $currentWinDir.TrimEnd('\\')) {
+                    Write-ColorMessage "ERROR: You entered the CURRENT Windows folder ($currentWinDir)." "Error"
+                    Write-ColorMessage "Offline USMT must be run against a Windows installation that is NOT booted (typically from WinPE)." "Warning"
+                    Pause
+                    break
+                }
+            } catch {
+                # Ignore path normalization failures
+            }
+
             if (-not (Test-OfflineWindowsDir -WindowsDir $offlineWinDir)) {
                 Write-ColorMessage "ERROR: Invalid offline Windows directory: $offlineWinDir" "Error"
                 Write-ColorMessage "Expected to find: <WindowsDir>\\System32\\config\\SYSTEM" "Warning"
@@ -805,17 +819,33 @@ do {
             }
             $env:USMT_WORKING_DIR = $usmtWorkingDir
 
-            $args = @()
-            $args += "$currentStore"
-            $args += "/i:$MigUserXML"
-            $args += "/i:$MigAppXML"
-            $args += "/i:$MigDocsXML"
-            $args += "/offlineWinDir:$offlineWinDir"
-            $args += "/all"
-            $args += "/o"
-            $args += "/c"
-            $args += "/v:5"
-            $args += "/l:$currentScanLog"
+            # Build Offline.xml mapping for WinPE/offline drive-letter translation
+            # This helps USMT map the source OS's typical C: layout to the currently mounted offline volume.
+            $offlineDriveRoot = Split-Path -Qualifier $offlineWinDir
+            $offlineXmlPath = Join-Path $currentStore "Offline.xml"
+            $offlineXml = @"
+<offline>
+  <winDir>
+    <path>$offlineWinDir</path>
+  </winDir>
+  <mappings>
+    <path>C:\\, $offlineDriveRoot</path>
+  </mappings>
+</offline>
+"@
+            $offlineXml | Out-File -FilePath $offlineXmlPath -Encoding UTF8 -NoNewline
+
+            $scanArgs = @()
+            $scanArgs += "$currentStore"
+            $scanArgs += "/i:$MigUserXML"
+            $scanArgs += "/i:$MigAppXML"
+            $scanArgs += "/i:$MigDocsXML"
+            $scanArgs += "/offline:$offlineXmlPath"
+            $scanArgs += "/all"
+            $scanArgs += "/o"
+            $scanArgs += "/c"
+            $scanArgs += "/v:5"
+            $scanArgs += "/l:$currentScanLog"
 
             Write-ColorMessage "Starting USMT Offline Backup..." "Info"
             Write-ColorMessage "This may take several minutes..." "Warning"
@@ -823,7 +853,7 @@ do {
 
             $startTime = Get-Date
             try {
-                & $ScanState @args
+                & $ScanState @scanArgs
                 $elapsed = (Get-Date) - $startTime
                 Write-Host ""
 
