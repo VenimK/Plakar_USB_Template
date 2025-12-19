@@ -173,6 +173,18 @@ throttle_jobs() {
     done
 }
 
+# Run Plakar maintenance (garbage collection / cleanup)
+run_maintenance() {
+    write_message "Running Plakar maintenance (cleanup)..." "Info"
+    "$PLAKAR_EXE" $KEYOPTION at "$REPO" maintenance
+    result=$?
+    if [ $result -eq 0 ]; then
+        write_message "Maintenance completed successfully." "Success"
+    else
+        write_message "Maintenance failed! Exit code: $result" "Error"
+    fi
+}
+
 #####################################################
 # MENU LOOP
 #####################################################
@@ -197,10 +209,11 @@ while true; do
     echo "5. View snapshot details"
     echo "6. Start Plakar UI"
     echo "7. Delete snapshot"
-    echo "8. Exit"
+    echo "8. Run maintenance (cleanup)"
+    echo "9. Exit"
     echo
 
-    read -p "Choose an option (1-8): " CHOICE
+    read -p "Choose an option (1-9): " CHOICE
 
     case $CHOICE in
         1)
@@ -377,6 +390,9 @@ while true; do
                     result=$?
                     if [ $result -eq 0 ]; then
                         write_message "Snapshot deleted successfully." "Success"
+                        if confirm_action "Run maintenance now to reclaim space?"; then
+                            run_maintenance
+                        fi
                     else
                         write_message "Failed to delete snapshot. Exit code: $result" "Error"
                     fi
@@ -389,11 +405,17 @@ while true; do
             read -p "Press enter..."
         ;;
         8)
+            if confirm_action "Run maintenance now?"; then
+                run_maintenance
+            fi
+            read -p "Press enter..."
+        ;;
+        9)
             write_message "Goodbye!" "Info"
             exit 0
         ;;
         *)
-            write_message "Invalid option. Please choose 1-8." "Warning"
+            write_message "Invalid option. Please choose 1-9." "Warning"
             read -p "Press enter..."
         ;;
     esac

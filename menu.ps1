@@ -487,13 +487,14 @@ function ShowMenu {
     Write-Host "5. View snapshot details"
     Write-Host "6. Start Plakar UI"
     Write-Host "7. Delete snapshot"
-    Write-Host "8. USMT Backup (ScanState)"
-    Write-Host "9. USMT Offline Backup (ScanState)"
-    Write-Host "10. USMT Restore (LoadState)"
-    Write-Host "11. View USMT Store Details"
-    Write-Host "12. Client Details (Private Browser)"
-    Write-Host "13. Technician Portal (Private Browser)"
-    Write-Host "14. Exit"
+    Write-Host "8. Run Plakar maintenance (cleanup)"
+    Write-Host "9. USMT Backup (ScanState)"
+    Write-Host "10. USMT Offline Backup (ScanState)"
+    Write-Host "11. USMT Restore (LoadState)"
+    Write-Host "12. View USMT Store Details"
+    Write-Host "13. Client Details (Private Browser)"
+    Write-Host "14. Technician Portal (Private Browser)"
+    Write-Host "15. Exit"
     Write-Host ""
 }
 
@@ -523,6 +524,20 @@ function PlakarBackup($Folder, $TagName) {
         Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
     }
     Pause
+}
+
+function PlakarMaintenance {
+    Write-ColorMessage "Running Plakar maintenance (cleanup)..." "Info"
+    try {
+        & $PlakarExe $KeyOption at "$Repo" maintenance
+        if ($LASTEXITCODE -eq 0) {
+            Write-ColorMessage "Maintenance completed successfully." "Success"
+        } else {
+            Write-ColorMessage "Maintenance FAILED. Exit code: $LASTEXITCODE" "Error"
+        }
+    } catch {
+        Write-ColorMessage "ERROR: $($_.Exception.Message)" "Error"
+    }
 }
 
 function PlakarRestore($SnapTag, $RestoreTo) {
@@ -637,6 +652,11 @@ do {
             Pause
         }
 
+        "8" {
+            PlakarMaintenance
+            Pause
+        }
+
         "5" {
             Write-ColorMessage "Listing snapshots..." "Info"
             & $PlakarExe $KeyOption at "$Repo" ls -tags
@@ -665,6 +685,9 @@ do {
                     & $PlakarExe $KeyOption at "$Repo" rm -tag "$SnapTag" -apply
                     if ($LASTEXITCODE -eq 0) {
                         Write-ColorMessage "Snapshot deleted successfully." "Success"
+                        if (Confirm-Action "Run maintenance now to reclaim space?") {
+                            PlakarMaintenance
+                        }
                     } else {
                         Write-ColorMessage "Failed to delete snapshot. Exit code: $LASTEXITCODE" "Error"
                     }
@@ -678,7 +701,7 @@ do {
         }
 
         # USMT Backup
-        "8" {
+        "9" {
             if (-not (Require-USMTCheck)) { break }
             
             Write-ColorMessage "=== USMT Backup (ScanState) ===" "Info"
@@ -787,7 +810,7 @@ do {
         }
 
         # USMT Offline Backup
-        "9" {
+        "10" {
             if (-not (Require-USMTCheck)) { break }
 
             Write-ColorMessage "=== USMT Offline Backup (ScanState) ===" "Info"
@@ -931,7 +954,7 @@ do {
         }
 
         # USMT Restore
-        "10" {
+        "11" {
             if (-not (Require-USMTCheck)) { break }
             
             Write-ColorMessage "=== USMT Restore (LoadState) ===" "Info"
@@ -1027,7 +1050,7 @@ do {
             Pause
         }
 
-        "11" {
+        "12" {
             # Let user select from available stores
             $selectedStore = Select-USMTStore -BasePath $USMTPath
             if ($selectedStore) {
@@ -1036,20 +1059,20 @@ do {
             Pause
         }
 
-        "12" {
+        "13" {
             Open-PrivateUrl -Url "https://prompt.nas86.eu"
             Pause
         }
 
-        "13" {
+        "14" {
             Open-PrivateUrl -Url "https://prompt.nas86.eu/technician"
             Pause
         }
 
-        "14" { exit }
+        "15" { exit }
 
         default {
-            Write-ColorMessage "Invalid option. Please choose 1-14." "Warning"
+            Write-ColorMessage "Invalid option. Please choose 1-15." "Warning"
             Pause
         }
     }
