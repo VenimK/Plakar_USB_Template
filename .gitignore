@@ -11,6 +11,9 @@ plakar_repo/states
 logs/
 work/
 
+# Python bytecode from the macOS web host (webui_mac.py).
+__pycache__/
+
 # Past inspections and pre-sweep copies: this is the state of one particular USB stick,
 # not the template, so it stays out of git even when it sits next to the tools.
 state_backup_*/

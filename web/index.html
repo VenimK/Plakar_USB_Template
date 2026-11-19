@@ -96,7 +96,7 @@
       stale — copy it, delete it, run Maintenance again.</p>
   </section>
 
-  <section>
+  <section data-windows-only>
     <h2>Tooling &amp; versions</h2>
     <div class="stats" id="toolStatus">no check yet</div>
     <table id="toolTable"><thead><tr><th>Drive</th><th>Tool</th><th>Repo written by</th><th>State</th><th>Own edits</th></tr></thead><tbody></tbody></table>
@@ -180,7 +180,7 @@
     <p class="note">Click a row to select that snapshot's tag above. Deleting reclaims space only after Maintenance runs.</p>
   </section>
 
-  <section>
+  <section data-windows-only>
     <h2>USMT — ScanState</h2>
     <label>Select users (USMT /ui)</label>
     <ul class="chips" id="usmtUsers"></ul>
@@ -217,7 +217,7 @@
     <p class="note warnbox">Offline mode must not target the currently booted Windows folder.</p>
   </section>
 
-  <section>
+  <section data-windows-only>
     <h2>USMT — LoadState</h2>
     <label for="storeSel">Store</label>
     <select id="storeSel"></select>
@@ -234,7 +234,7 @@
     <table id="storeTable"><thead><tr><th>Store</th><th>Created</th><th>Size</th><th>Files</th><th>Flags / users</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <section>
+  <section data-windows-only>
     <h2>Shortcuts</h2>
     <div class="row">
       <button data-url="https://prompt.nas86.eu">Client Details (private browser)</button>
@@ -346,6 +346,14 @@ function renderInfo() {
       else { selectedUsers.add(full); li.classList.add('on'); }
     };
   });
+
+  if (i.platform === 'mac') {
+    document.querySelectorAll('[data-windows-only]').forEach(e => e.style.display = 'none');
+    badge.textContent = 'macOS';
+    badge.className = 'badge';
+    document.getElementById('mUsmt').textContent = 'USMT: Windows only';
+    document.querySelector('header h1').firstChild.textContent = 'Plakar Technician Menu ';
+  }
 }
 
 function renderTooling(t) {

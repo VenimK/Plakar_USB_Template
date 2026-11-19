@@ -160,6 +160,25 @@ console output is already visible.
 - Before LoadState, `menu.ps1` takes a Plakar snapshot of `C:\Users`
   (`PreRestore_<timestamp>`) so a wrong restore can be undone.
 
+## macOS (reduced host)
+
+`webui.sh` starts `webui_mac.py`, a Python 3 standard-library host bound to
+`http://127.0.0.1:8765`. It serves the same `web/index.html`; the page detects
+`platform: "mac"` from `/api/info` and hides the tooling, USMT and shortcut panels.
+Backup, restore, list, check, maintenance, prune, locate, delete and Plakar's own UI
+use the same `plakar` binary and CLI as `menu.sh`. Each job logs to
+`logs/<jobid>_<action>.log`, KO paths go to `logs/skipped_<tag>.txt`, and logs rotate
+at 10 MB with 5 archives kept — the same rules as the other two hosts.
+
+```bash
+./webui.sh                 # opens Chrome Incognito, or the default browser
+./webui.sh -p 8080         # different port
+./webui.sh --no-browser    # only start the listener
+```
+
+Python 3 is the only extra requirement, and the macOS Command Line Tools that Git
+needs already provide it. Nothing is installed and the listener binds to `127.0.0.1`.
+
 ## Requirements
 
 - Windows PowerShell 5.1 or PowerShell 7 on the target PC — unavoidable, because

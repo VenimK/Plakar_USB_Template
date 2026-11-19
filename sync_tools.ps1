@@ -58,7 +58,7 @@ $ToolFiles = @(
     'menu.ps1','menu.sh','backup.ps1','backup.sh','restore.ps1','restore.sh',
     'plakarusb.sh','reclaim.ps1','fix_acls.ps1','webserver.ps1','webui.bat',
     'howto.txt','README.txt','USMT_SETUP.md','WEBUI.md','.gitattributes','.gitignore',
-    'web/index.html',
+    'web/index.html','webui.sh','webui_mac.py',
     'MigApp.xml','MigDocs.xml','MigModern.xml','MigUser.xml'
 )
 $Binaries = @('plakar.exe','plakar')
