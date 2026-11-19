@@ -1,0 +1,6 @@
+# Shell scripts must stay LF: a CRLF shebang line breaks them on macOS/Linux.
+*.sh text eol=lf
+
+# Windows scripts keep CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf

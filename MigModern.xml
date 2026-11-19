@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MigModern.xml - supplementary rules for the Plakar USB template.
+
+  Why this file exists
+  ====================
+  The stock ADK MigUser.xml migrates shell folders and files with a known
+  document extension. Modern applications keep real user data in AppData
+  (browser profile state, application settings, IDE and game configuration),
+  and also keep huge re-downloadable caches in the same tree. That means the
+  stock rules miss user data and, at the same time, copy cache bloat.
+
+  This file adds two things:
+    1. a catch-all rule for every file inside each user profile;
+    2. an unconditionalExclude block that drops cache-only trees, so the store
+       stays small without losing settings.
+
+  It is additive: MigUser.xml and MigApp.xml keep working unchanged. menu.ps1
+  and webserver.ps1 load this file automatically when it is present, so simply
+  delete it to get the original stock behaviour back.
+
+  Rules of thumb
+  ==============
+  - Pass the same XML set to ScanState and LoadState (the hosts already do).
+  - Only documented variables are used here: %PROFILESFOLDER%, %CSIDL_*, and
+    plain environment variables, which USMT expands inside location patterns.
+  - Everything listed under <unconditionalExclude> applies to every XML file
+    loaded in the same run, including MigUser.xml and MigApp.xml. Remove a line
+    if you want that tree in the store.
+  - OneDrive Files On-Demand placeholders are enumerated as files. If the source
+    machine has Files On-Demand switched on, either materialise the files first
+    or uncomment the OneDrive exclusion below.
+-->
+<migration urlid="http://www.microsoft.com/migration/1.0/migxmlext/migmodern">
+
+    <_locDefinition>
+        <_locDefault _loc="locNone"/>
+        <_locTag _loc="locData">displayName</_locTag>
+    </_locDefinition>
+
+    <!-- 1. Cache-only trees: the application rebuilds them, so they are not
+            worth a place in the store. -->
+    <unconditionalExclude>
+        <objectSet>
+            <!-- Windows shell, history, search and error-report spool -->
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Windows\Explorer\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Windows\INetCache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Windows\History\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Windows\WebCache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Windows\Recent\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Windows\Shell\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Windows\WER\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Windows\Temp\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Temp\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\CrashDumps\* [*]</pattern>
+
+            <!-- Recycle Bin (per profile) -->
+            <pattern type="File">%PROFILESFOLDER%\*\$Recycle.Bin\* [*]</pattern>
+
+            <!-- Chromium-based browsers: cache trees only, profile state is kept -->
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Edge\User Data\*\Cache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Edge\User Data\*\Code Cache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Edge\User Data\*\GPUCache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Edge\User Data\Crashpad\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Google\Chrome\User Data\*\Cache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Google\Chrome\User Data\*\Code Cache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Google\Chrome\User Data\*\GPUCache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Google\Chrome\User Data\Crashpad\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\BraveSoftware\Brave-Browser\User Data\*\Cache\* [*]</pattern>
+
+            <!-- Developer / package caches -->
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\.cache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\npm-cache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\pip\Cache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\NuGet\Cache\* [*]</pattern>
+            <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\VisualStudio\*Cache\* [*]</pattern>
+            <pattern type="File">%USERPROFILE%\.nuget\packages\* [*]</pattern>
+        </objectSet>
+    </unconditionalExclude>
+
+    <!-- 2. Catch-all: every file inside every user profile. This is what the
+            stock rules do not cover. Caches are dropped by the block above. -->
+    <component type="Documents" context="System">
+        <displayName _locID="migmodern.profilefiles">User profile files (everything)</displayName>
+        <role role="Data">
+            <rules>
+                <include filter='MigXmlHelper.IgnoreIrrelevantLinks()'>
+                    <objectSet>
+                        <pattern type="File">%PROFILESFOLDER%\* [*]</pattern>
+                    </objectSet>
+                </include>
+                <exclude>
+                    <objectSet>
+                        <!-- Uncomment to skip a cloud-synced folder whose files are
+                             placeholders on disk (Files On-Demand):
+                        <pattern type="File">%USERPROFILE%\OneDrive\* [*]</pattern>
+                        -->
+                        <!-- Store/backup hygiene: never pick up a store inside a profile -->
+                        <pattern type="File">%PROFILESFOLDER%\*\Plakar_Store\* [*]</pattern>
+                    </objectSet>
+                </exclude>
+            </rules>
+        </role>
+    </component>
+
+    <!-- 3. Browser profile state, kept explicit so the intent survives even if
+            the catch-all component above is commented out. Bookmarks, settings,
+            extension state and sign-in state are all inside User Data. -->
+    <component type="Documents" context="User">
+        <displayName _locID="migmodern.browserstate">Browser profile state</displayName>
+        <role role="Data">
+            <detects>
+                <detect>
+                    <condition>MigXmlHelper.DoesObjectExist("File","%CSIDL_LOCAL_APPDATA%\Microsoft\Edge\User Data")</condition>
+                </detect>
+                <detect>
+                    <condition>MigXmlHelper.DoesObjectExist("File","%CSIDL_LOCAL_APPDATA%\Google\Chrome\User Data")</condition>
+                </detect>
+            </detects>
+            <rules>
+                <include filter='MigXmlHelper.IgnoreIrrelevantLinks()'>
+                    <objectSet>
+                        <pattern type="File">%CSIDL_LOCAL_APPDATA%\Microsoft\Edge\User Data\* [*]</pattern>
+                        <pattern type="File">%CSIDL_LOCAL_APPDATA%\Google\Chrome\User Data\* [*]</pattern>
+                        <pattern type="File">%CSIDL_LOCAL_APPDATA%\BraveSoftware\Brave-Browser\User Data\* [*]</pattern>
+                    </objectSet>
+                </include>
+            </rules>
+        </role>
+    </component>
+
+    <!-- 4. Application settings that live outside the shell folders the stock
+            rules know about (Roaming AppData is where most of them sit). -->
+    <component type="Documents" context="User">
+        <displayName _locID="migmodern.appsettings">Application settings (AppData)</displayName>
+        <role role="Data">
+            <rules>
+                <include filter='MigXmlHelper.IgnoreIrrelevantLinks()'>
+                    <objectSet>
+                        <pattern type="File">%CSIDL_APPDATA%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_LOCAL_APPDATA%\* [*]</pattern>
+                    </objectSet>
+                </include>
+            </rules>
+        </role>
+    </component>
+
+</migration>

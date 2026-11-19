@@ -19,7 +19,7 @@ fi
 REPO="$USB_DRIVE/plakar_repo"
 PLAKAR_EXE="$USB_DRIVE/plakar"
 KEYFILE="$USB_DRIVE/.plakar_key"
-KEYOPTION=""
+KEYOPTION=()
 
 if [ ! -f "$PLAKAR_EXE" ]; then
     echo "Error: plakar executable not found at $PLAKAR_EXE"
@@ -27,19 +27,19 @@ if [ ! -f "$PLAKAR_EXE" ]; then
 fi
 
 if [ -f "$KEYFILE" ]; then
-    KEYOPTION="-keyfile $KEYFILE"
+    KEYOPTION=(-keyfile "$KEYFILE")
 fi
 
 # ================= Start Plakar agent =================
 $PLAKAR_EXE agent status &>/dev/null
 if [ $? -ne 0 ]; then
     echo "Starting Plakar agent..."
-    $PLAKAR_EXE $KEYOPTION agent start
+    "$PLAKAR_EXE" "${KEYOPTION[@]}" agent start
 fi
 
 # ================= List snapshots =================
 echo "Available snapshots:"
-$PLAKAR_EXE $KEYOPTION at "$REPO" ls
+"$PLAKAR_EXE" "${KEYOPTION[@]}" at "$REPO" ls
 
 # ================= Prompt snapshot and restore path =================
 read -p "Enter snapshot ID to restore: " SNAPSHOT
@@ -54,7 +54,10 @@ LOG_FILE="$LOG_DIR/restore_$TIMESTAMP.log"
 
 # ================= Restore =================
 echo "Restoring snapshot $SNAPSHOT to $RESTORE_PATH..."
-$PLAKAR_EXE $KEYOPTION at "$REPO" restore -to "$RESTORE_PATH" "$SNAPSHOT" | tee -a "$LOG_FILE"
+# Same as menu.sh: per-file permission work is the dominant cost on a profile-shaped
+# restore (measured 2x on 20k small files, on Windows). Files inherit permissions from
+# the destination instead of the stored mode/owner.
+"$PLAKAR_EXE" "${KEYOPTION[@]}" at "$REPO" restore -to "$RESTORE_PATH" -o skip_permissions=1 "$SNAPSHOT" | tee -a "$LOG_FILE"
 
 echo "Restore complete. Log saved to $LOG_FILE"
 

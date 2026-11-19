@@ -1,7 +1,7 @@
 #!/bin/bash
 # backup.sh – Mac technician backup script with Plakar
 # Supports user profile selection OR custom folder
-# Auto-detect USB/local test folder, external/NAS destinations, logs
+# Auto-detect USB/local test folder, logs
 
 # ================= Auto-detect repository =================
 TEST_FOLDER="$HOME/plakar_test"
@@ -21,7 +21,7 @@ fi
 REPO="$USB_DRIVE/plakar_repo"
 PLAKAR_EXE="$USB_DRIVE/plakar"
 KEYFILE="$USB_DRIVE/.plakar_key"
-KEYOPTION=""
+KEYOPTION=()
 
 if [ ! -f "$PLAKAR_EXE" ]; then
     echo "Error: plakar executable not found at $PLAKAR_EXE"
@@ -29,18 +29,26 @@ if [ ! -f "$PLAKAR_EXE" ]; then
 fi
 
 if [ -f "$KEYFILE" ]; then
-    KEYOPTION="-keyfile $KEYFILE"
+    KEYOPTION=(-keyfile "$KEYFILE")
 fi
 
 # ================= Start Plakar agent =================
 $PLAKAR_EXE agent status &>/dev/null
 if [ $? -ne 0 ]; then
     echo "Starting Plakar agent..."
-    $PLAKAR_EXE $KEYOPTION agent start
+    "$PLAKAR_EXE" "${KEYOPTION[@]}" agent start
 fi
 
 # ================= Create repository if not exists =================
-$PLAKAR_EXE $KEYOPTION at "$REPO" create
+if [ ! -f "$REPO/CONFIG" ]; then
+    echo "Creating Plakar repository at $REPO..."
+    mkdir -p "$REPO"
+    "$PLAKAR_EXE" "${KEYOPTION[@]}" at "$REPO" create
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to create Plakar repository"
+        exit 1
+    fi
+fi
 
 # ================= Logs =================
 LOG_DIR="$USB_DRIVE/logs"
@@ -48,16 +56,12 @@ mkdir -p "$LOG_DIR"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 LOG_FILE="$LOG_DIR/backup_$TIMESTAMP.log"
 
-# ================= Prompt for destination =================
-read -p "Enter backup destination (leave empty to use repository): " DEST
-DEST=${DEST:-$REPO}
-
 # ================= Prompt for custom folder =================
 read -p "Enter full path of folder to backup (leave empty to select user profiles): " CUSTOM_FOLDER
 
 if [ -n "$CUSTOM_FOLDER" ] && [ -d "$CUSTOM_FOLDER" ]; then
     echo "Backing up folder $CUSTOM_FOLDER..."
-    $PLAKAR_EXE $KEYOPTION at "$REPO" backup "$CUSTOM_FOLDER" --destination "$DEST" | tee -a "$LOG_FILE"
+    "$PLAKAR_EXE" "${KEYOPTION[@]}" at "$REPO" backup "$CUSTOM_FOLDER" | tee -a "$LOG_FILE"
 else
     # ================= User profile selection =================
     SKIP=("Shared" "Guest" "Deleted Users")
@@ -81,7 +85,7 @@ else
         if [ $IDX -ge 0 ] && [ $IDX -lt ${#PROFILES[@]} ]; then
             PROFILE_PATH="${PROFILES[$IDX]}"
             echo "Backing up $PROFILE_PATH..."
-            $PLAKAR_EXE $KEYOPTION at "$REPO" backup "$PROFILE_PATH" --destination "$DEST" | tee -a "$LOG_FILE"
+            "$PLAKAR_EXE" "${KEYOPTION[@]}" at "$REPO" backup "$PROFILE_PATH" | tee -a "$LOG_FILE"
         fi
     done
 fi

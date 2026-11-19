@@ -5,9 +5,14 @@ Copy all three scripts to the root of your USB drive along with:
 USB_ROOT\
  ├─ plakar_repo\        (your Plakar repository)
  ├─ .plakar_key         (optional for silent unlock)
+ ├─ logs\               (per-run logs, kept outside the store)
+ ├─ work\               (USMT scratch space, kept outside the store)
  ├─ backup.ps1
  ├─ restore.ps1
- └─ menu.ps1
+ ├─ menu.ps1
+ ├─ webserver.ps1 + web\  (optional HTML front-end, see WEBUI.md)
+ ├─ mig*.xml            (migration rules; migmodern.xml is the optional extra set)
+ └─ USMT\amd64\         (scanstate.exe, loadstate.exe, usmtutils.exe from the ADK)
 
 
 Plug the USB into any Windows PC.
@@ -61,5 +66,10 @@ Restore: select snapshot and destination
 Snapshots: list available snapshots
 
 UI: open Plakar web interface
+
+USMT (options 9 to 12, Windows only): scan a profile into a store, restore it with
+LoadState, verify a store with usmtutils, and delete a store. The store must sit on
+an NTFS volume, and logs plus the USMT working directory always stay outside it.
+See USMT_SETUP.md for the ADK install, the exit codes, and the flags.
 
 Everything works without installing Plakar, fully portable.

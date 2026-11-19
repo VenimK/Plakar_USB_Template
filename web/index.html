@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plakar + USMT Technician Menu</title>
+<style>
+  :root {
+    --bg: #0f1418; --panel: #161d24; --panel2: #1c2530; --line: #27313d;
+    --text: #e6edf3; --muted: #8b98a5; --accent: #4cc2ff; --ok: #46d17e;
+    --warn: #ffcc66; --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0 0 4px; font-size: 16px; }
+  header .meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 10px; }
+  header .meta span { font-family: ui-monospace, Consolas, monospace; }
+  main { padding: 16px 20px 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  section h2 { margin: 0 0 10px; font-size: 14px; color: var(--accent); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  input[type=text], input[type=password], input[type=number], select {
+    width: 100%; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--text); font: inherit;
+  }
+  label { display: block; margin: 8px 0 4px; color: var(--muted); font-size: 12px; }
+  button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2);
+    color: var(--text); cursor: pointer; font: inherit; }
+  button.primary { background: #143349; border-color: #2b5a7d; color: #cfe9ff; }
+  button.danger { background: #3a1c1c; border-color: #6b3030; color: #ffd6d6; }
+  button:hover { filter: brightness(1.15); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .stats { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+  .stats b { color: var(--text); }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); }
+  .badge.ok { color: var(--ok); border-color: #2e5f40; }
+  .badge.warn { color: var(--warn); border-color: #6b5a2e; }
+  .badge.err { color: var(--err); border-color: #6b3030; }
+  pre.console { background: #0b1015; border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+    max-height: 260px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .jobs { grid-column: 1 / -1; }
+  .job { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 8px; background: var(--panel2); }
+  .job .head { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; }
+  .job .head .name { color: var(--text); font-weight: 600; }
+  .job .head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .job.running .head .dot { background: var(--warn); animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+  .bar { height: 3px; border-radius: 3px; margin-top: 8px; background: var(--line); overflow: hidden; }
+  .bar.live { height: 3px; border-radius: 3px; margin-top: 8px; background: linear-gradient(90deg, var(--warn), #6b5a2e, var(--warn)); background-size: 200% 100%; animation: shine 1.4s linear infinite; }
+  @keyframes shine { 0% { background-position: 0 0; } 100% { background-position: 200% 0; } }
+  .job .now { margin-top: 8px; color: #cfe9ff; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .job pre { margin: 8px 0 0; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #c8d3de; max-height: 220px; overflow: auto; }
+  ul.chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  ul.chips li { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; background: var(--panel2); cursor: pointer; }
+  ul.chips li.on { border-color: var(--accent); color: #cfe9ff; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  #snapTable tbody tr { cursor: pointer; }
+  #snapTable tbody tr:hover { background: var(--panel2); }
+  #snapTable tbody tr.on { background: var(--panel2); color: #cfe9ff; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .warnbox { color: var(--warn); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Plakar + USMT Technician Menu <span class="badge" id="adminBadge">admin</span></h1>
+  <div class="meta">
+    <span id="mRepo">repo</span>
+    <span id="mUsmt">usmt</span>
+    <span id="mKey">key</span>
+    <span><button id="refresh" style="padding:4px 10px">Refresh</button></span>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>Repository</h2>
+    <div class="stats" id="stats"></div>
+    <div class="row">
+      <button class="primary" data-act="plakar_list">List snapshots</button>
+      <button class="primary" data-act="plakar_maintenance">Maintenance (reclaim space)</button>
+      <button data-act="plakar_ui">Open Plakar web UI</button>
+    </div>
+    <p class="note">Plakar's own UI (option above) is the browser view for browsing and downloading snapshot contents.</p>
+  </section>
+
+  <section>
+    <h2>Repository health</h2>
+    <div class="stats" id="health"></div>
+    <div class="row"><button class="primary" data-act="plakar_check">Run integrity check (fast, read-only)</button></div>
+    <p class="note">Coloured packfiles are the numbers from the last Maintenance run: plakar colours them and
+      removes them on a later run, after a 7-day grace period. A lock file with no plakar process running is
+      stale — copy it, delete it, run Maintenance again.</p>
+  </section>
+
+  <section>
+    <h2>Tooling &amp; versions</h2>
+    <div class="stats" id="toolStatus">no check yet</div>
+    <table id="toolTable"><thead><tr><th>Drive</th><th>Tool</th><th>Repo written by</th><th>State</th><th>Own edits</th></tr></thead><tbody></tbody></table>
+    <label for="toolDrives">Drives — empty means every removable drive; letters like <code>E:,F:</code>, or a full path for a test folder</label>
+    <input type="text" id="toolDrives" placeholder="E:,F:">
+    <div class="row"><button class="primary" id="runToolCheck">Check tooling per drive (read-only)</button></div>
+    <hr style="border-color:var(--line)">
+    <div class="row"><input type="checkbox" id="toolDryRun" checked><label for="toolDryRun">Dry run only — show what would be copied, copy nothing</label></div>
+    <div class="row"><input type="checkbox" id="toolCheckFirst" checked><label for="toolCheckFirst">Ask GitHub for the latest plakar release first (needs network)</label></div>
+    <div class="row"><input type="checkbox" id="toolBinaries"><label for="toolBinaries">Carry plakar.exe / plakar to the drives</label></div>
+    <div class="row"><input type="checkbox" id="toolKey"><label for="toolKey">Carry .plakar_key (only when the drive has none; a drive with a different key is left alone unless -Force)</label></div>
+    <div class="row"><input type="checkbox" id="toolForce"><label for="toolForce">Overwrite files the drive owns (-Force)</label></div>
+    <div class="row"><input type="checkbox" id="toolRestore"><label for="toolRestore">Put _known_good back instead of syncing (rollback of the last sync)</label></div>
+    <div class="row"><button class="primary" id="runToolSync">Run sync</button></div>
+    <p class="note">Runs <code>sync_tools.ps1</code> on the host, so its rules stay the same as on the command line: data folders are never copied, a file the drive edited itself is skipped unless -Force, a tool that is older than the version that wrote that drive's repository is refused, and the previous copy is kept in <code>_known_good\</code>. Syncing needs no elevation — it only copies files.</p>
+  </section>
+
+  <section>
+    <h2>Passphrase</h2>
+    <label for="pass">Repository passphrase (stored as plaintext .plakar_key on the USB)</label>
+    <input type="password" id="pass" placeholder="leave blank for no passphrase">
+    <div class="row"><button class="primary" id="saveKey">Save / test unlock</button></div>
+    <p class="note warnbox" id="keyMsg">Keep the USB in a secure location.</p>
+  </section>
+
+  <section>
+    <h2>Backup</h2>
+    <label>Profiles on this machine</label>
+    <ul class="chips" id="users"></ul>
+    <label for="folder">Folder to back up</label>
+    <input type="text" id="folder" placeholder="C:\Users\JohnDoe">
+    <label for="tag">Snapshot name</label>
+    <input type="text" id="tag" placeholder="UserProfile_JohnDoe">
+    <div class="row">
+      <input type="checkbox" id="excludeJunk" checked>
+      <label for="excludeJunk">Skip junk (<span id="junkList">Temp, Cache, INetCache, Thumbnails, Explorer, NuGet, npm-cache, pkg-npm-caches, *.tmp</span>) — bare names match at any depth, so a user folder named Cache or Explorer is skipped too. On a typical profile these are about half the bytes and a third of the file count. Untick it when you want Temp for forensics.</label>
+    </div>
+    <div class="row"><button class="primary" id="runBackup">Run backup</button></div>
+  </section>
+
+  <section>
+    <h2>Retention &amp; search</h2>
+    <label>Retention policy — plakar keeps every snapshot by itself, so a stick fills up</label>
+    <div class="grid">
+      <div>
+        <label for="pruneDays">Days to keep</label>
+        <input type="number" id="pruneDays" value="30" min="1">
+      </div>
+      <div>
+        <label for="prunePerDay">Max kept per day</label>
+        <input type="number" id="prunePerDay" value="1" min="1">
+      </div>
+    </div>
+    <label for="pruneCategory">Category the policy applies to (empty for all)</label>
+    <input type="text" id="pruneCategory" value="profile">
+    <div class="row">
+      <input type="checkbox" id="pruneApply">
+      <label for="pruneApply">Apply the policy and delete the snapshots the plan lists. Unticked only shows the plan.</label>
+    </div>
+    <div class="row"><button class="primary" id="runPrune">Run plan</button></div>
+    <label for="locatePattern">Find a file across every snapshot</label>
+    <input type="text" id="locatePattern" placeholder="invoice.pdf">
+    <div class="row"><button class="primary" id="runLocate">Search</button></div>
+    <p class="note">Snapshots are grouped by name, so each profile gets its own allowance. Prune does not reclaim space by itself — Maintenance does, after the 7-day grace period. plakar has no size cap, so a pattern cannot limit one huge file.</p>
+  </section>
+
+  <section>
+    <h2>Restore</h2>
+    <label for="snapTag">Snapshot tag</label>
+    <select id="snapTag"></select>
+    <label for="restoreTo">Restore to</label>
+    <input type="text" id="restoreTo" placeholder="C:\Restored">
+    <div class="row">
+      <button class="primary" id="runRestore">Run restore</button>
+      <button class="danger" id="runDelete">Delete selected snapshot</button>
+    </div>
+    <label>Snapshots</label>
+    <table id="snapTable"><thead><tr><th>Date</th><th>Hash</th><th>Size</th><th>Path</th><th>Tags</th></tr></thead><tbody></tbody></table>
+    <label>Snapshots (raw plakar output)</label>
+    <pre class="console" id="snapRaw">not loaded yet</pre>
+    <p class="note">Click a row to select that snapshot's tag above. Deleting reclaims space only after Maintenance runs.</p>
+  </section>
+
+  <section>
+    <h2>USMT — ScanState</h2>
+    <label>Select users (USMT /ui)</label>
+    <ul class="chips" id="usmtUsers"></ul>
+    <label>Gather options</label>
+    <div class="row">
+      <label for="efsSel">EFS-encrypted files</label>
+      <select id="efsSel">
+        <option value="skip" selected>skip (recommended)</option>
+        <option value="abort">abort the run</option>
+        <option value="decryptcopy">decrypt and copy</option>
+        <option value="copyraw">copy raw</option>
+      </select>
+    </div>
+    <div class="row">
+      <input type="checkbox" id="localOnly" checked>
+      <label for="localOnly">Local drives only (/localonly) — skips drives Windows reports as Removable or Network</label>
+    </div>
+    <div class="row">
+      <input type="checkbox" id="excludeUsb" checked>
+      <label for="excludeUsb">Exclude the drive this tool runs from (<span id="usbDriveLabel">this drive</span>) from the scan — Windows reports it as Fixed, so /localonly does not cover it. The store can still be written to this drive.</label>
+    </div>
+    <div class="row">
+      <input type="checkbox" id="noCompress">
+      <label for="noCompress">No compression (/nocompress) — a testing option; LoadState must use the same setting</label>
+    </div>
+    <label for="usmtKey">Keyfile for /encrypt (leave empty to store unencrypted)</label>
+    <input type="text" id="usmtKey" placeholder="C:\path\to\usmt_keyfile.txt">
+    <p class="note">Logs go to the logs folder, never inside the store (USMT rejects /l inside StorePath).</p>
+    <div class="row"><button class="primary" id="runScan">Run ScanState (live OS)</button></div>
+    <hr style="border-color:var(--line)">
+    <label for="winDir">Offline Windows folder (from WinPE / mounted old disk)</label>
+    <input type="text" id="winDir" placeholder="D:\Windows">
+    <div class="row"><button class="primary" id="runOffline">Run ScanState (offline)</button></div>
+    <p class="note warnbox">Offline mode must not target the currently booted Windows folder.</p>
+  </section>
+
+  <section>
+    <h2>USMT — LoadState</h2>
+    <label for="storeSel">Store</label>
+    <select id="storeSel"></select>
+    <label for="rpass">Password for created local accounts (cannot be blank)</label>
+    <input type="password" id="rpass">
+    <label for="userMap">Optional user mapping (/mu), LoadState only: OldDomain_OldUser:NewDomain_NewUser</label>
+    <input type="text" id="userMap" placeholder="OLDPC_jdoe:NEWPC_jdoe">
+    <div class="row">
+      <button class="primary" id="runLoad">Run LoadState</button>
+      <button id="runDetails">Store details</button>
+      <button id="runVerify">Verify store (usmtutils)</button>
+    </div>
+    <p class="note warnbox">LoadState writes to this machine and may need a reboot to finish. It uses the compression and encryption flags recorded in the store manifest.</p>
+    <table id="storeTable"><thead><tr><th>Store</th><th>Created</th><th>Size</th><th>Files</th><th>Flags / users</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section>
+    <h2>Shortcuts</h2>
+    <div class="row">
+      <button data-url="https://prompt.nas86.eu">Client Details (private browser)</button>
+      <button data-url="https://prompt.nas86.eu/technician/login">Technician Portal (private browser)</button>
+    </div>
+    <p class="note">These open Edge InPrivate / Chrome Incognito through the host, not from the page itself.</p>
+  </section>
+
+  <section class="jobs">
+    <h2>Activity</h2>
+    <p class="note">Live view, refreshed every second. Running jobs show the newest line and how long they have been going; finished jobs show the exit code.</p>
+    <div id="jobs"></div>
+  </section>
+</main>
+
+<script>
+let INFO = null;
+const selectedUsers = new Set();
+
+async function j(url, opts) {
+  const r = await fetch(url, opts);
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'request failed');
+  return d;
+}
+
+function esc(s) {
+  // Lines already captured before the UTF-8 fix stored the check mark as Ô£ô.
+  return String(s).replace(/\u00d4\u00a3\u00f4/g, '\u2713').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+// ConvertTo-Json collapses a single-element collection into one object, and an empty
+// one into {}. Normalize both: a plain object is an empty collection, not one element.
+function arr(x) {
+  if (Array.isArray(x)) return x;
+  if (!x || typeof x === 'object') return [];
+  return [x];
+}
+
+function renderInfo() {
+  const i = INFO;
+  document.getElementById('mRepo').textContent = i.repo;
+  document.getElementById('mUsmt').textContent = i.usmtPath + (i.scanstateFound ? '' : ' (USMT not found)');
+  document.getElementById('mKey').textContent = 'key: ' + i.keyStatus;
+  document.getElementById('usbDriveLabel').textContent = i.usbDrive || 'this drive';
+  document.getElementById('junkList').textContent = arr(i.junkPatterns).join(', ') || 'junk';
+  const badge = document.getElementById('adminBadge');
+  badge.textContent = i.isAdmin ? 'administrator' : 'NOT admin';
+  badge.className = 'badge ' + (i.isAdmin ? 'ok' : 'err');
+
+  const ri = i.repoInfo;
+  const orphan = ri.sizeGB > ri.logicalGB ? ` — ${ri.logicalGB} GB referenced, rest orphaned` : '';
+  document.getElementById('stats').innerHTML =
+    `<span><b>${ri.snapshotCount}</b> snapshots</span>` +
+    `<span><b>${ri.sizeGB}</b> GB on disk${orphan}</span>` +
+    `<span class="badge ${ri.keyOk ? 'ok' : 'warn'}">${ri.keyOk ? 'repo unlocked' : 'repo not unlocked'}</span>`;
+
+  renderHealth(i.health);
+  renderTooling(i.tooling);
+
+  const sel = document.getElementById('snapTag');
+  sel.innerHTML = arr(ri.tags).map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('') || '<option value="">no tags parsed</option>';
+  document.getElementById('snapRaw').textContent = ri.raw || 'no snapshots';
+
+  const snapBody = document.querySelector('#snapTable tbody');
+  const snaps = arr(ri.snapshots);
+  snapBody.innerHTML = snaps.map(s => {
+    const tags = arr(s.tags);
+    const first = tags[0] || '';
+    const on = first === sel.value ? ' class="on"' : '';
+    return `<tr data-tag="${esc(first)}"${on}><td>${esc(s.date)}</td><td>${esc(s.hash)}</td>` +
+           `<td>${esc(s.size)}</td><td>${esc(s.path)}</td><td>${esc(tags.join(', '))}</td></tr>`;
+  }).join('') || '<tr><td colspan="5">no snapshots parsed</td></tr>';
+  snapBody.querySelectorAll('tr[data-tag]').forEach(tr => tr.onclick = () => {
+    sel.value = tr.dataset.tag;
+    snapBody.querySelectorAll('tr').forEach(x => x.classList.remove('on'));
+    tr.classList.add('on');
+  });
+
+  const tb = document.querySelector('#storeTable tbody');
+  tb.innerHTML = arr(i.stores).map(s => {
+    const flags = [];
+    if (s.noCompress) flags.push('nocompress');
+    if (s.encrypted) flags.push('encrypted');
+    if (s.efsMode) flags.push('efs:' + s.efsMode);
+    if (s.exitCode !== null && s.exitCode !== undefined && s.exitCode !== 0) flags.push('exit ' + s.exitCode);
+    const users = arr(s.users).length ? arr(s.users).map(u => esc(String(u).split('\\').pop())).join(', ') : 'all (/all)';
+    return `<tr><td>${esc(s.name)}</td><td>${esc(s.created)}</td><td>${s.sizeGB} GB</td><td>${s.fileCount}</td>` +
+           `<td>${esc(flags.join(' · ')) || '—'}<br><span class="note">${users}</span></td></tr>`;
+  }).join('');
+  const storeSel = document.getElementById('storeSel');
+  storeSel.innerHTML = arr(i.stores).map(s => `<option value="${esc(s.path)}">${esc(s.name)}</option>`).join('') || '<option value="">no stores</option>';
+
+  const list = arr(i.users);
+  const backupChips = document.getElementById('users');
+  backupChips.innerHTML = list.map(u => `<li data-path="${esc(u.path)}">${esc(u.name)}</li>`).join('') || '<li>none</li>';
+  backupChips.querySelectorAll('li').forEach(li => li.onclick = () => {
+    backupChips.querySelectorAll('li').forEach(x => x.classList.remove('on'));
+    li.classList.add('on');
+    document.getElementById('folder').value = li.dataset.path;
+  });
+
+  const usmtChips = document.getElementById('usmtUsers');
+  usmtChips.innerHTML = list.map(u => `<li data-full="${esc(u.full)}">${esc(u.name)}</li>`).join('') || '<li>none</li>';
+  usmtChips.querySelectorAll('li').forEach(li => {
+    if (selectedUsers.has(li.dataset.full)) li.classList.add('on');
+    li.onclick = () => {
+      const full = li.dataset.full;
+      if (selectedUsers.has(full)) { selectedUsers.delete(full); li.classList.remove('on'); }
+      else { selectedUsers.add(full); li.classList.add('on'); }
+    };
+  });
+}
+
+function renderTooling(t) {
+  const status = document.getElementById('toolStatus');
+  if (!t) { status.innerHTML = '<p class="note">no check yet — run the check below</p>'; }
+  else {
+    const u = t.update;
+    const kind = !u ? 'warn' : ((u.status || '').includes('behind') ? 'err' : ((u.status || '').includes('unreachable') ? 'warn' : 'ok'));
+    status.innerHTML =
+      `<span>template tool <b>${esc(t.masterTool || '?')}</b></span>` +
+      (u ? `<span class="badge ${kind}">GitHub latest ${esc(u.latest || '?')} — ${esc(u.status || '?')}</span>` : '') +
+      `<span class="note">checked ${esc(t.at || '?')}</span>`;
+  }
+  const tb = document.querySelector('#toolTable tbody');
+  const drives = arr(t ? t.drives : []);
+  tb.innerHTML = drives.map(d => {
+    let state;
+    if (d.refused) state = 'REFUSED: ' + d.refused;
+    else if (d.upToDate) state = 'up to date';
+    else state = d.diffCount + ' file(s) differ';
+    const kind = d.refused ? 'err' : (d.upToDate ? 'ok' : 'warn');
+    const edits = arr(d.localEdits);
+    return `<tr><td>${esc(d.drive)}</td><td>${esc(d.toolVersion || 'unknown')}</td>` +
+           `<td>${esc(d.repoVersion || 'no repo')}</td>` +
+           `<td><span class="badge ${kind}">${esc(state)}</span></td>` +
+           `<td>${esc(edits.join(', ')) || '—'}</td></tr>`;
+  }).join('') || '<tr><td colspan="5">no drive with a Plakar_USB_Template folder found</td></tr>';
+}
+
+function renderHealth(h) {
+  const box = document.getElementById('health');
+  if (!h) { box.innerHTML = '<p class="note">no health data</p>'; return; }
+
+  const lock = h.lockFileCount
+    ? (h.lockStale
+        ? `<span class="badge err">lock: stale file (${h.lockFileCount})</span>`
+        : `<span class="badge warn">lock: held by plakar PID ${arr(h.livePlakarPids).join(', ')}</span>`)
+    : '<span class="badge ok">lock: free</span>';
+
+  const packs = `<span class="badge">${h.packfileCount} packfiles, ${h.packfileMB} MB` +
+                (h.leftoverTmpPackfiles ? `, ${h.leftoverTmpPackfiles} leftover tmp packfile` : '') + '</span>';
+
+  const m = h.lastMaintenance;
+  const maint = m
+    ? `<span class="badge ${(m.coloured || m.orphaned) ? 'warn' : 'ok'}">last maintenance ${esc(m.at)}: ` +
+      `coloured ${m.coloured}, orphaned ${m.orphaned}, removed ${m.removedPackfiles} packfiles / ${m.removedBlobs} blobs</span>`
+    : '<span class="badge">maintenance: never recorded</span>';
+
+  const c = h.lastCheck;
+  const check = c
+    ? `<span class="badge ${c.flagged ? 'err' : (c.exitCode === 0 ? 'ok' : 'err')}">last check ${esc(c.at)}: ` +
+      `${c.flagged ? 'issues flagged' : 'clean'} (exit ${c.exitCode})</span>`
+    : '<span class="badge">check: never recorded</span>';
+
+  box.innerHTML = lock + packs + maint + check;
+}
+
+function renderJobs(jobs) {
+  jobs = arr(jobs);
+  const box = document.getElementById('jobs');
+  if (!jobs.length) { box.innerHTML = '<p class="note">Nothing has run yet.</p>'; return; }
+  box.innerHTML = jobs.slice().reverse().map(job => {
+    const status = String(job.status || '').toLowerCase();
+    const running = status === 'running';
+    const st = running ? 'warn' : (job.exitCode === 0 ? 'ok' : (job.exitCode === 3 ? 'warn' : 'err'));
+    const code = job.exitCode !== null && job.exitCode !== undefined ? ` · exit ${job.exitCode}` : '';
+    const lines = job.lineCount ? ` · ${job.lineCount} lines` : '';
+    const el = job.elapsed ? ` · ${esc(job.elapsed)}` : '';
+    const tail = arr(job.output).slice(-80);
+    return `<div class="job${running ? ' running' : ''}"><div class="head"><span class="dot"></span>` +
+           `<span class="name">${esc(job.label)}</span>` +
+           `<span class="badge ${st}">${esc(status)}${code}</span>` +
+           `<span>${esc(job.started)}${el}${lines}</span>` +
+           (job.store ? `<span>${esc(job.store)}</span>` : '') + '</div>' +
+           `<div class="${running ? 'bar live' : 'bar'}"></div>` +
+           (running && job.lastLine ? `<div class="now">now: ${esc(job.lastLine)}</div>` : '') +
+           (job.logFile ? `<div class="note">log: ${esc(job.logFile)}</div>` : '') +
+           (job.progress ? `<div class="note">progress: ${esc(job.progress)}</div>` : '') +
+           `<pre>${esc(tail.join('\n')) || (running ? 'No output yet. USMT writes its activity to the log and progress files, which are streamed here while the tool runs.' : '…')}</pre></div>`;
+  }).join('');
+  const live = box.querySelector('.job.running pre');
+  if (live) live.scrollTop = live.scrollHeight;
+}
+
+async function run(action, payload) {
+  try {
+    const r = await j('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...payload }) });
+    await poll();
+    return r;
+  } catch (e) { alert(e.message); }
+}
+
+const lastStatus = {};
+async function poll() {
+  try {
+    const jobs = arr(await j('/api/jobs'));
+    renderJobs(jobs);
+    let finished = false;
+    for (const job of jobs) {
+      const status = String(job.status || '').toLowerCase();
+      if (lastStatus[job.id] !== status) {
+        lastStatus[job.id] = status;
+        if (['completed', 'partial', 'failed', 'stopped', 'gone'].includes(status)) finished = true;
+      }
+    }
+    if (finished) { INFO = await j('/api/info'); renderInfo(); renderJobs(arr(INFO.jobs)); }
+  } catch (e) { /* host restarting */ }
+}
+
+document.getElementById('refresh').onclick = async () => { INFO = await j('/api/info'); renderInfo(); renderJobs(INFO.jobs); };
+
+document.getElementById('saveKey').onclick = async () => {
+  try {
+    const d = await j('/api/key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passphrase: document.getElementById('pass').value }) });
+    document.getElementById('keyMsg').textContent = d.message;
+  } catch (e) { alert(e.message); }
+};
+
+document.getElementById('runBackup').onclick = () => run('plakar_backup', { folder: document.getElementById('folder').value, tag: document.getElementById('tag').value, excludeJunk: document.getElementById('excludeJunk').checked });
+
+document.getElementById('runPrune').onclick = () => run('plakar_prune', {
+  days: parseInt(document.getElementById('pruneDays').value, 10) || 30,
+  perDay: parseInt(document.getElementById('prunePerDay').value, 10) || 1,
+  category: document.getElementById('pruneCategory').value,
+  apply: document.getElementById('pruneApply').checked
+});
+
+document.getElementById('runLocate').onclick = () => run('plakar_locate', { pattern: document.getElementById('locatePattern').value });
+document.getElementById('runRestore').onclick = () => {
+  const tag = document.getElementById('snapTag').value;
+  if (!tag) return alert('Pick a snapshot tag.');
+  if (!confirm(`Restore snapshot "${tag}"?`)) return;
+  run('plakar_restore', { tag, to: document.getElementById('restoreTo').value });
+};
+document.getElementById('runDelete').onclick = () => {
+  const tag = document.getElementById('snapTag').value;
+  if (!tag) return alert('Pick a snapshot tag.');
+  if (!confirm(`DELETE snapshot "${tag}"? This cannot be undone.`)) return;
+  run('plakar_delete', { tag, maintenance: true });
+};
+function toolDrives() {
+  return document.getElementById('toolDrives').value.split(',').map(x => x.trim()).filter(Boolean);
+}
+document.getElementById('runToolCheck').onclick = () => run('tool_update_check', { drives: toolDrives() });
+document.getElementById('runToolSync').onclick = () => {
+  const dry = document.getElementById('toolDryRun').checked;
+  if (!dry && !confirm('Copy the tooling onto the drive(s)? The previous copy of each file is kept in _known_good.')) return;
+  run('tool_sync', {
+    dryRun: dry,
+    check: document.getElementById('toolCheckFirst').checked,
+    binaries: document.getElementById('toolBinaries').checked,
+    key: document.getElementById('toolKey').checked,
+    force: document.getElementById('toolForce').checked,
+    restore: document.getElementById('toolRestore').checked,
+    drives: toolDrives()
+  });
+};
+function usmtOptions() {
+  return {
+    efs: document.getElementById('efsSel').value,
+    localonly: document.getElementById('localOnly').checked,
+    excludeUsb: document.getElementById('excludeUsb').checked,
+    nocompress: document.getElementById('noCompress').checked,
+    keyfile: document.getElementById('usmtKey').value.trim()
+  };
+}
+
+document.getElementById('runScan').onclick = () => {
+  if (!selectedUsers.size) return alert('Select at least one user.');
+  run('usmt_scan', { users: [...selectedUsers], ...usmtOptions() });
+};
+document.getElementById('runOffline').onclick = () => run('usmt_offline', { winDir: document.getElementById('winDir').value, ...usmtOptions() });
+document.getElementById('runLoad').onclick = () => {
+  const store = document.getElementById('storeSel').value;
+  const pass = document.getElementById('rpass').value;
+  if (!store) return alert('No store selected.');
+  if (!pass) return alert('Password cannot be blank.');
+  if (!confirm(`LoadState will write user profiles and settings to THIS machine. Continue?`)) return;
+  run('usmt_restore', { store, password: pass, userMap: document.getElementById('userMap').value.trim() });
+};
+document.getElementById('runDetails').onclick = () => run('store_details', { store: document.getElementById('storeSel').value });
+document.getElementById('runVerify').onclick = () => {
+  const store = document.getElementById('storeSel').value;
+  if (!store) return alert('No store selected.');
+  run('usmt_check', { store });
+};
+
+document.querySelectorAll('[data-act]').forEach(b => b.onclick = () => run(b.dataset.act, {}));
+document.querySelectorAll('[data-url]').forEach(b => b.onclick = () => run('open_private_url', { url: b.dataset.url }));
+
+(async () => { INFO = await j('/api/info'); renderInfo(); renderJobs(INFO.jobs); setInterval(poll, 1000); })();
+</script>
+</body>
+</html>

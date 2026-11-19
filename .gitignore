@@ -5,4 +5,29 @@ plakar_repo/locks
 plakar_repo/packfiles
 plakar_repo/states
 .plakar_key
+# Binaries ship on the USB stick, not in git: plakar.exe alone is 51 MB.
+/plakar
+/plakar.exe
 logs/
+work/
+
+# Past inspections and pre-sweep copies: this is the state of one particular USB stick,
+# not the template, so it stays out of git even when it sits next to the tools.
+state_backup_*/
+_packfile_quarantine/
+plakar-2026*/
+_acl_report/
+_acl_recovery/
+_delme/
+greeting-*.md
+
+# SUPERSEDED 2026-11-02: the agent folder is no longer committed. This template is
+# copied to technician PCs, so `.claude/` (rules, memory notes, hooks, skills) is this
+# machine's agent config and stays out of git. `AGENTS.md` and `CLAUDE.md` at the repo
+# root are the committed rules; nested `AGENTS.md` stubs point at the rule files.
+.claude/
+
+# Former rule (was: the memory index and notes stay in git, the hook state does not):
+# SUPERSEDED 2026-11-02 by the block above. Kept here in case the folder is later
+# committed on purpose; hook state must never be committed either way.
+.claude/memory/state/

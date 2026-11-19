@@ -11,19 +11,55 @@ $repoPath = "$repoDrive\plakar_repo"
 $plakarExe = "$repoDrive\plakar.exe"
 if (!(Test-Path $plakarExe)) { Write-Error "plakar.exe not found on USB!"; exit }
 
-# Detect keyfile
+# Detect keyfile (-keyfile and path as separate argv elements)
 $keyFile = "$repoDrive\.plakar_key"
-$keyOption = if (Test-Path $keyFile) { "-keyfile `"$keyFile`"" } else { "" }
+$plakarArgs = @()
+if (Test-Path -LiteralPath $keyFile) {
+    $plakarArgs += "-keyfile"
+    $plakarArgs += $keyFile
+}
+
+# Verified after the repository exists (see below): a repository that does not
+# exist yet cannot unlock.
+function Test-PlakarRepoUnlock {
+    param([string[]]$KeyArgs)
+    if ($KeyArgs.Count -eq 0) { return $true }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        & $plakarExe @KeyArgs -quiet at $repoPath ls 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } finally { $ErrorActionPreference = $prev }
+}
 
 # Start Plakar agent if not running
 & "$plakarExe" agent status 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Starting Plakar agent..."
-    & "$plakarExe" $keyOption agent start
+    & "$plakarExe" @plakarArgs agent start
 }
 
 # Create repository if not exists
-& "$plakarExe" $keyOption at "$repoPath" create
+$configPath = Join-Path $repoPath "CONFIG"
+if (!(Test-Path -LiteralPath $configPath)) {
+    Write-Host "Creating Plakar repository at $repoPath..."
+    & "$plakarExe" @plakarArgs at "$repoPath" create
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create Plakar repository."; exit }
+}
+
+# Verify the keyfile actually unlocks this repository before anything runs. Without
+# this check a stale or placeholder keyfile only shows up as an interactive
+# passphrase prompt in the middle of the backup. Checked after create, because a
+# repository that does not exist yet cannot unlock.
+if ($plakarArgs.Count -gt 0) {
+    $keyContent = Get-Content -LiteralPath $keyFile -Raw -ErrorAction SilentlyContinue
+    if ($keyContent -match 'CHANGE_THIS_PASSPHRASE') {
+        Write-Warning ".plakar_key still holds the placeholder passphrase. Run menu.ps1 once to set a real one."
+    }
+    elseif (!(Test-PlakarRepoUnlock $plakarArgs)) {
+        Write-Warning ".plakar_key did not unlock this repository. Run menu.ps1 once to fix its encoding, or enter the passphrase when prompted."
+    }
+}
 
 # Create logs folder
 $logFolder = "$repoDrive\logs"
@@ -48,7 +84,7 @@ foreach ($idx in $selectedIndexes) {
     if ($idx -ge 0 -and $idx -lt $userProfiles.Count) {
         $profilePath = $userProfiles[$idx].FullName
         Write-Host "`nBacking up $profilePath..."
-        & "$plakarExe" $keyOption at "$repoPath" backup $profilePath | Tee-Object -FilePath $logFile
+        & "$plakarExe" @plakarArgs at "$repoPath" backup $profilePath | Tee-Object -FilePath $logFile
     }
 }
 
