@@ -8,6 +8,8 @@ plakar_repo/states
 # Binaries ship on the USB stick, not in git: plakar.exe alone is 51 MB.
 /plakar
 /plakar.exe
+# The copy kept before an update replaces ./plakar: same convention as on a drive.
+/_known_good/
 logs/
 work/
 

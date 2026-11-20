@@ -7,14 +7,19 @@ Windows-only; the page hides those panels when /api/info reports platform="mac".
 """
 import argparse
 import gzip
+import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
+import tarfile
 import threading
+import urllib.request
 import webbrowser
 from collections import deque
 from datetime import datetime
@@ -45,6 +50,162 @@ def plakar():
     return shutil.which("plakar")
 
 
+KNOWN_GOOD = os.path.join(ROOT, "_known_good")
+VER_CACHE = {}
+LATEST_CACHE = {}
+
+
+def vtuple(s):
+    nums = re.findall(r"\d+", s or "")
+    return [int(n) for n in nums] or [0]
+
+
+def plakar_version(exe):
+    """Version of a binary, cached per file so page polling does not re-run it."""
+    if not exe:
+        return ""
+    try:
+        key = (exe, os.path.getmtime(exe))
+    except OSError:
+        return ""
+    if key in VER_CACHE:
+        return VER_CACHE[key]
+    try:
+        p = subprocess.run([exe, "version"], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, encoding="utf-8", errors="replace", timeout=20)
+        found = re.search(r"v\d+(\.\d+)*", p.stdout or "")
+        ver = found.group(0) if found else ""
+    except Exception:
+        ver = ""
+    VER_CACHE[key] = ver
+    return ver
+
+
+def latest_release(refresh=False, block=True):
+    """Latest release tag, cached: a failed or slow lookup must never block the page."""
+    if not refresh and "tag" in LATEST_CACHE:
+        return LATEST_CACHE["tag"]
+    if not block:
+        return LATEST_CACHE.get("tag", "")
+    tag = ""
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/PlakarKorp/plakar/releases/latest",
+            headers={"User-Agent": "webui_mac"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            tag = str(json.loads(r.read().decode("utf-8")).get("tag_name") or "")
+    except Exception:
+        tag = ""
+    LATEST_CACHE["tag"] = tag
+    return tag
+
+
+def release_target():
+    """(os, arch) pair for the release asset plakar_<ver>_<os>_<arch>.tar.gz."""
+    osname = {"darwin": "darwin", "linux": "linux"}.get(sys.platform, "")
+    arch = {"x86_64": "amd64", "amd64": "amd64", "arm64": "arm64", "aarch64": "arm64"}.get(
+        platform.machine().lower(), "")
+    return osname, arch
+
+
+def download_plakar(job, tag):
+    """Install the release build as ./plakar, verified against the release checksums.
+
+    A binary already sitting here is kept in _known_good, the same convention
+    sync_tools.ps1 uses on a drive. A plakar found in PATH is never touched: this
+    copy simply takes precedence.
+    """
+    osname, arch = release_target()
+    if not osname or not arch:
+        job.add("ERROR: no plakar release for %s %s. Copy a binary into %s yourself."
+                % (sys.platform, platform.machine(), ROOT))
+        return 1
+    if not tag:
+        job.add("ERROR: could not read the latest release from GitHub.")
+        return 1
+    ver = tag.lstrip("v")
+    asset = "plakar_%s_%s_%s.tar.gz" % (ver, osname, arch)
+    base = "https://github.com/PlakarKorp/plakar/releases/download/%s/" % tag
+    tmp = tempfile.mkdtemp(prefix="plakar-update-")
+    try:
+        path = os.path.join(tmp, asset)
+        job.add("Downloading %s ..." % asset)
+        try:
+            with urllib.request.urlopen(base + asset, timeout=300) as r, open(path, "wb") as f:
+                shutil.copyfileobj(r, f)
+        except Exception as exc:
+            job.add("ERROR: download failed: %s" % exc)
+            return 1
+        try:
+            with urllib.request.urlopen(base + "plakar_%s_checksums.txt" % ver, timeout=30) as r:
+                sums = r.read().decode("utf-8", errors="replace")
+        except Exception as exc:
+            job.add("ERROR: checksums file not fetched (%s); refusing an unverified binary." % exc)
+            return 1
+        want = ""
+        for line in sums.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == asset:
+                want = parts[0].lower()
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        got = digest.hexdigest()
+        if not want or want != got:
+            job.add("ERROR: SHA-256 mismatch for %s (expected %s, got %s). Nothing was installed."
+                    % (asset, want or "not listed", got))
+            return 1
+        job.add("SHA-256 verified.")
+        try:
+            with tarfile.open(path, "r:gz") as t:
+                names = [m for m in t.getmembers() if m.isfile() and os.path.basename(m.name) == "plakar"]
+                if not names:
+                    job.add("ERROR: no plakar binary inside %s." % asset)
+                    return 1
+                # Write the one member by hand: no tar path handling, works on any Python 3.
+                with t.extractfile(names[0]) as src, open(os.path.join(tmp, "plakar"), "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        except Exception as exc:
+            job.add("ERROR: could not unpack %s: %s" % (asset, exc))
+            return 1
+        found = os.path.join(tmp, "plakar")
+        here = os.path.join(ROOT, "plakar")
+        if os.path.isfile(here):
+            try:
+                os.makedirs(KNOWN_GOOD, exist_ok=True)
+                shutil.copy2(here, os.path.join(KNOWN_GOOD, "plakar"))
+                job.add("Previous copy kept in " + os.path.join(KNOWN_GOOD, "plakar"))
+            except OSError as exc:
+                job.add("WARNING: could not keep the previous binary: %s" % exc)
+        shutil.move(found, here)
+        os.chmod(here, 0o755)
+        if shutil.which("xattr"):
+            subprocess.run(["xattr", "-d", "com.apple.quarantine", here],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+        VER_CACHE.clear()
+        new = plakar_version(here)
+        job.add("Installed %s (%s)" % (here, new or "version unknown"))
+        LATEST_CACHE["tag"] = tag
+        save_health("tool", dict(at=now(), version=new or tag, path=here))
+        return 0
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def tool_info():
+    exe = plakar()
+    ver = plakar_version(exe)
+    # Never block a page request on GitHub: the tag arrives from the lookup started
+    # at launch, and the page re-reads /api/info while it is still empty.
+    latest = latest_release(block=False)
+    return dict(path=exe or "", version=ver, latest=latest,
+                updateAvailable=bool(exe and ver and latest and vtuple(latest) > vtuple(ver)),
+                fromUsb=bool(exe and exe == os.path.join(ROOT, "plakar")))
+
+
 def keyargs():
     return ["-keyfile", KEYFILE] if os.path.isfile(KEYFILE) else []
 
@@ -69,10 +230,11 @@ def ensure_repo():
     if not exe:
         say("ERROR: plakar not found. Copy the macOS plakar binary next to this script.")
         return False
-    out, code = call(["agent", "status"])
-    if code != 0:
-        say("Starting plakar agent...")
-        call(["agent", "start"])
+    # No agent: every job here is a plain `plakar at <repo> <cmd>` CLI call.
+    # Starting one also hangs the host - the daemon inherits call()'s stdout
+    # pipe and keeps it open, so subprocess.run waits for the agent to stop
+    # (or for its 120 s timeout) before the page is served. plakar 1.1.8 has
+    # no `agent` subcommand at all. menu.sh keeps its own agent handling.
     os.makedirs(LOGDIR, exist_ok=True)
     if not os.path.isfile(os.path.join(REPO, "CONFIG")):
         say("Creating repository at " + REPO)
@@ -371,6 +533,18 @@ def dispatch(job):
                          stderr=subprocess.DEVNULL)
         job.add("Plakar UI started.")
         return 0
+    if action == "plakar_update":
+        tag = latest_release(refresh=True)
+        if not tag:
+            job.add("ERROR: GitHub not reachable, nothing to compare with.")
+            return 1
+        here = plakar()
+        job.add("Current: %s (%s) - latest release %s"
+                % (here or "none", plakar_version(here) or "unknown", tag))
+        if here == os.path.join(ROOT, "plakar") and plakar_version(here) == tag:
+            job.add("Already the latest release. Nothing to do.")
+            return 0
+        return download_plakar(job, tag)
     job.add("ERROR: action '%s' is Windows-only in this template." % action)
     return 1
 
@@ -408,6 +582,7 @@ def info():
                       logicalGB=logical, keyOk=(code == 0),
                       raw=raw_ls.strip(), tags=tags, snapshots=snaps),
         health=health_info(), stores=[], users=users(), tooling=None,
+        tool=tool_info(),
         jobs=[j.view() for j in JOBS.values()])
 
 
@@ -469,11 +644,16 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     ap = argparse.ArgumentParser(description="Reduced macOS web host for the technician page")
-    ap.add_argument("-p", "--port", type=int, default=8765)
+    ap.add_argument("-p", "--port", type=int, default=8118)
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
     if not plakar():
         say("WARNING: plakar not found; copy the macOS binary next to this script.")
+    threading.Thread(target=latest_release, kwargs=dict(refresh=True), daemon=True).start()
+    t = tool_info()
+    if t["path"]:
+        say("plakar %s at %s%s" % (t["version"] or "unknown", t["path"],
+                                   "" if t["fromUsb"] else " (from PATH; a release build here would take precedence)"))
     if not ensure_repo():
         say("WARNING: repository is not ready; the page will still load.")
     url = "http://127.0.0.1:%d/" % args.port

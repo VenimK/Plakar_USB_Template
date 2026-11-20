@@ -163,18 +163,57 @@ console output is already visible.
 ## macOS (reduced host)
 
 `webui.sh` starts `webui_mac.py`, a Python 3 standard-library host bound to
-`http://127.0.0.1:8765`. It serves the same `web/index.html`; the page detects
+`http://127.0.0.1:8118` (the Windows host keeps `8765`; `-p` changes it). It serves
+the same `web/index.html`; the page detects
 `platform: "mac"` from `/api/info` and hides the tooling, USMT and shortcut panels.
 Backup, restore, list, check, maintenance, prune, locate, delete and Plakar's own UI
-use the same `plakar` binary and CLI as `menu.sh`. Each job logs to
+use the same `plakar` binary and CLI as `menu.sh`, but the host never starts a plakar
+agent: those jobs are direct `plakar at <repo> <cmd>` calls, and an agent start would
+hold the host's stdout pipe open until the agent stopped, delaying the page. The agent
+handling stays in `menu.sh`. Each job logs to
 `logs/<jobid>_<action>.log`, KO paths go to `logs/skipped_<tag>.txt`, and logs rotate
 at 10 MB with 5 archives kept — the same rules as the other two hosts.
 
 ```bash
-./webui.sh                 # opens Chrome Incognito, or the default browser
-./webui.sh -p 8080         # different port
-./webui.sh --no-browser    # only start the listener
+./webui.sh                  # report versions, update when behind, open Chrome Incognito
+./webui.sh -p 8080          # different port
+./webui.sh --no-browser     # only start the listener
+./webui.sh --update-plakar  # fetch the latest release now, even when not behind
+./webui.sh --install-plakar # fetch the first binary without asking
+./webui.sh --no-update      # report the versions only, never fetch anything
+./webui.sh --no-download    # never fetch: report what is missing and exit
 ```
+
+Every start reports the versions before serving: where `plakar` was found (next to
+the scripts, or in `PATH`), its version, and the latest release, saying whether the
+binary in use is behind. `webui.sh` looks for the binary the same way `webui_mac.py`
+does — `./plakar` first, then `plakar` in `PATH`.
+
+The build is chosen from `uname -s`/`uname -m` (`plakar_<ver>_darwin_arm64.tar.gz`,
+`…_linux_amd64.tar.gz`, …) of the latest `PlakarKorp/plakar` release and checked
+against that release's SHA-256 checksums file, then installed as `./plakar` in the
+template root — the layout the README asks for, the one `sync_tools.ps1` syncs between
+drives, and already gitignored. A replaced binary is kept in `_known_good/plakar`,
+the same convention `sync_tools.ps1` uses on a drive, so a bad install is undone by
+copying it back. A checksum mismatch installs nothing.
+
+When a binary is present and the release is newer, `webui.sh` updates it before
+starting the page. A plakar that came from `PATH` — a Homebrew copy, for example — is
+never overwritten: the release build is installed next to the scripts, and `plakar()`
+prefers that copy, so the USB stays self-contained and the machine's own install is
+untouched. Flags: `--update-plakar` installs the latest release even when not behind;
+`--no-update` (and `--no-download`) only reports; `--install-plakar` fetches the first
+binary without asking, which is what a first run otherwise prompts for. An old plakar
+refuses options the scripts pass, such as `-o skip_permissions=1`, which is why the
+version is reported at all.
+
+`/api/info` carries the same numbers as `tool` (path, version, latest, whether an
+update is available, whether the binary is the one on this drive), and the page shows
+them in a macOS-only *plakar binary* panel with an **Update plakar to the latest
+release** button; that action re-reads the release, verifies and installs it, and the
+panel then shows the new version. The GitHub lookup runs in the background, so the
+page never waits for the network, and a host without network simply reports that the
+latest release was not read. The Windows-only *Tooling & versions* panel is unchanged.
 
 Python 3 is the only extra requirement, and the macOS Command Line Tools that Git
 needs already provide it. Nothing is installed and the listener binds to `127.0.0.1`.

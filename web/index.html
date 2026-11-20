@@ -37,6 +37,9 @@
   .badge.ok { color: var(--ok); border-color: #2e5f40; }
   .badge.warn { color: var(--warn); border-color: #6b5a2e; }
   .badge.err { color: var(--err); border-color: #6b3030; }
+  /* The mac panels are hidden until /api/info says the host is the mac one. */
+  [data-macos-only] { display: none; }
+  body.mac [data-macos-only] { display: block; }
   pre.console { background: #0b1015; border: 1px solid var(--line); border-radius: 8px; padding: 10px;
     max-height: 260px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
   .jobs { grid-column: 1 / -1; }
@@ -71,6 +74,7 @@
     <span id="mRepo">repo</span>
     <span id="mUsmt">usmt</span>
     <span id="mKey">key</span>
+    <span id="mPlakar">plakar</span>
     <span><button id="refresh" style="padding:4px 10px">Refresh</button></span>
   </div>
 </header>
@@ -94,6 +98,16 @@
     <p class="note">Coloured packfiles are the numbers from the last Maintenance run: plakar colours them and
       removes them on a later run, after a 7-day grace period. A lock file with no plakar process running is
       stale — copy it, delete it, run Maintenance again.</p>
+  </section>
+
+  <section data-macos-only>
+    <h2>plakar binary</h2>
+    <div class="stats" id="plakarStatus">checking…</div>
+    <p class="note" id="plakarNote"></p>
+    <div class="row"><button class="primary" data-act="plakar_update">Update plakar to the latest release</button></div>
+    <p class="note">The download is checked against the release's SHA-256 checksums before anything is
+      installed, and the binary that was here before is kept in <code>_known_good/</code>. A plakar that came
+      from PATH (for example Homebrew) is never overwritten: the copy next to these scripts simply wins.</p>
   </section>
 
   <section data-windows-only>
@@ -284,6 +298,16 @@ function renderInfo() {
   badge.textContent = i.isAdmin ? 'administrator' : 'NOT admin';
   badge.className = 'badge ' + (i.isAdmin ? 'ok' : 'err');
 
+  const t = i.tool;
+  const plakarSpan = document.getElementById('mPlakar');
+  if (t) {
+    plakarSpan.textContent = 'plakar ' + (t.version || 'unknown') +
+      (t.updateAvailable ? ' → ' + t.latest : '');
+    plakarSpan.className = t.updateAvailable ? 'badge warn' : '';
+  } else {
+    plakarSpan.style.display = 'none';
+  }
+
   const ri = i.repoInfo;
   const orphan = ri.sizeGB > ri.logicalGB ? ` — ${ri.logicalGB} GB referenced, rest orphaned` : '';
   document.getElementById('stats').innerHTML =
@@ -348,11 +372,32 @@ function renderInfo() {
   });
 
   if (i.platform === 'mac') {
+    document.body.classList.add('mac');
     document.querySelectorAll('[data-windows-only]').forEach(e => e.style.display = 'none');
     badge.textContent = 'macOS';
     badge.className = 'badge';
     document.getElementById('mUsmt').textContent = 'USMT: Windows only';
     document.querySelector('header h1').firstChild.textContent = 'Plakar Technician Menu ';
+    const st = document.getElementById('plakarStatus');
+    const note = document.getElementById('plakarNote');
+    if (!t || !t.path) {
+      st.innerHTML = '<span class="badge err">plakar not present</span>';
+      note.textContent = 'Start ./webui.sh in a terminal: it fetches the build for this machine. Or copy a plakar binary next to these scripts yourself.';
+    } else if (!t.latest) {
+      st.innerHTML = `<span class="badge ok">${esc(t.version || 'unknown')}</span> ` +
+        `<span class="badge">${t.fromUsb ? 'this drive' : 'from PATH'}</span>`;
+      note.textContent = 'Latest release not read yet, or GitHub not reachable.';
+    } else if (t.updateAvailable) {
+      st.innerHTML = `<span class="badge err">${esc(t.version)} behind</span> <span class="badge">latest ${esc(t.latest)}</span>`;
+      note.textContent = t.fromUsb
+        ? 'The copy next to these scripts is older than the release above. Update replaces it, keeping the old one in _known_good.'
+        : 'plakar was found in PATH, not on this drive. Updating installs the release build here; that copy then wins and the PATH one is left alone.';
+    } else {
+      st.innerHTML = `<span class="badge ok">${esc(t.version)} up to date</span> <span class="badge">${esc(t.latest)} is the latest</span>`;
+      note.textContent = t.fromUsb ? 'Nothing to do: this drive carries the newest release.' : 'A copy on this drive would make the USB self-contained; Update puts it here.';
+    }
+  } else {
+    document.querySelectorAll('[data-macos-only]').forEach(e => e.style.display = 'none');
   }
 }
 
@@ -447,8 +492,16 @@ async function run(action, payload) {
 }
 
 const lastStatus = {};
+// Until the first GitHub lookup finished, the page keeps re-reading /api/info so the
+// version line fills itself in; capped, so an unreachable GitHub does not poll forever.
+let infoTries = 0;
 async function poll() {
   try {
+    if (INFO && INFO.tool && !INFO.tool.latest && infoTries < 12) {
+      infoTries++;
+      INFO = await j('/api/info');
+      renderInfo();
+    }
     const jobs = arr(await j('/api/jobs'));
     renderJobs(jobs);
     let finished = false;
